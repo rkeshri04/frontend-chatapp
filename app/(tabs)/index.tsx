@@ -190,6 +190,26 @@ export default function TabOneScreen() {
               tintColor={colors.tint}
             />
           }
+          ListFooterComponent={
+            isLoading && !refreshing ? (
+              <View style={styles.footerLoading}>
+                <ActivityIndicator size="large" color={colors.tint} />
+                <Text style={[styles.loadingText, { color: colors.text }]}>
+                  Loading conversations...
+                </Text>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            isLoading && !refreshing ? (
+              <View style={styles.centerLoading}>
+                <ActivityIndicator size="large" color={colors.tint} />
+                <Text style={[styles.loadingText, { color: colors.text }]}>
+                  Loading conversations...
+                </Text>
+              </View>
+            ) : null
+          }
         />
         
         <TouchableOpacity 
@@ -357,5 +377,20 @@ const styles = StyleSheet.create({
   buttonText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  footerLoading: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  centerLoading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    height: 300,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
   },
 });
