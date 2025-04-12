@@ -102,14 +102,22 @@ export default function TabOneScreen() {
       if (verifyConversationCode.fulfilled.match(resultAction)) {
         const { chatId } = resultAction.payload;
         const verifiedCode = enteredCode.trim(); // Store the verified code
-        console.log(`Code verified for chat ${chatId}. Fetching messages and navigating.`);
+        console.log(`Code verified for chat ${chatId}. Setting current chat, fetching messages, and navigating.`);
         
+        // --- Set current chat ID *before* fetching messages ---
+        dispatch(setCurrentChat(chatId)); 
+        // -----------------------------------------------------
+
         // Code is valid, fetch messages first, passing the verified code
         await dispatch(fetchChatMessages({ chatId, code: verifiedCode })).unwrap(); // Pass code here
         
-        // Close modal and navigate
+        // Close modal and navigate, passing the code as a param
         setModalVisible(false);
-        router.push(`../chat/${chatId}`);
+        // Pass code as a query parameter
+        router.push({ 
+          pathname: `../chat/${chatId}`, 
+          params: { primaryCode: verifiedCode } 
+        }); 
       } else {
         // Handle rejection (invalid code or other errors from thunk)
         let errorMessage = 'Verification failed. Please try again.';
