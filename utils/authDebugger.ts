@@ -61,6 +61,16 @@ export const debugAuthToken = async () => {
       console.log('No activity time info found');
     }
     
+    // Check Redux store state
+    const state = store.getState();
+    console.log('Redux auth state:', {
+      hasToken: !!state.auth.token,
+      hasUser: !!state.auth.user,
+      initialized: state.auth.initialized,
+      isLoading: state.auth.isLoading,
+      showExpiryWarning: state.auth.showExpiryWarning,
+    });
+    
     console.log('===================================');
   } catch (error) {
     console.error('Error in auth debugger:', error);
@@ -148,6 +158,30 @@ export const setQuickExpirySession = async (secondsUntilExpiry: number = 35) => 
     return true;
   } catch (error) {
     console.error('Error setting quick expiry session:', error);
+    return false;
+  }
+};
+
+/**
+ * Force a clean slate by clearing all auth data
+ */
+export const clearAllAuthData = async () => {
+  try {
+    console.log('Clearing all auth data from secure storage');
+    
+    // Remove all auth-related items from secure storage
+    await SecureStore.deleteItemAsync('token');
+    await SecureStore.deleteItemAsync('user');
+    await SecureStore.deleteItemAsync('sessionExpiryTime');
+    await SecureStore.deleteItemAsync('lastActivityTime');
+    
+    // Force Redux to refresh
+    store.dispatch({ type: 'auth/forceRefresh' });
+    
+    console.log('All auth data cleared');
+    return true;
+  } catch (error) {
+    console.error('Error clearing auth data:', error);
     return false;
   }
 };

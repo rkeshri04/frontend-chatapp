@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Slot, useRouter } from 'expo-router';
+import { useEffect, useState, useRef } from 'react';
+import { Slot, useRouter, useSegments } from 'expo-router';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import { initializeAuth, checkSessionExpiry, updateActivity, logout } from './store/slices/authSlice';
 import { initializeTheme } from './store/slices/themeSlice';
-import { TouchableWithoutFeedback, AppState, AppStateStatus, Text, View } from 'react-native';
+import { TouchableWithoutFeedback, AppState, AppStateStatus, Text, View, ActivityIndicator } from 'react-native';
 import SessionExpiryNotification from '../components/SessionExpiryNotification';
 import { useAppTheme } from './hooks/useAppTheme';
+import { logAuth, logAuthError, logNavigation, dumpAuthState } from '../utils/authLogger';
 
 // Function to wrap the app with Redux Provider
 export function RootLayoutNav() {
@@ -18,29 +19,63 @@ export function RootLayoutNav() {
   );
 }
 
+// Helper to check if path is in auth group
+function isAuthGroup(segments: string[]) {
+  return segments[0] === '(auth)';
+}
+
 // Component to handle auth state and session management
 function AppWrapper() {
   const dispatch = useAppDispatch();
   const router = useRouter();
+  const segments = useSegments();
   const token = useAppSelector(state => state.auth.token);
   const sessionExpiryTime = useAppSelector(state => state.auth.sessionExpiryTime);
-  const { colorScheme } = useAppTheme();
+  const authInitialized = useAppSelector(state => state.auth.initialized);
+  const authError = useAppSelector(state => state.auth.error);
+  const { colors, colorScheme } = useAppTheme();
   const [initializing, setInitializing] = useState(true);
+  
+  // Used to prevent multiple redirects
+  const hasRedirected = useRef(false);
+  
+  // Dump the full auth state for debugging
+  useEffect(() => {
+    const state = store.getState();
+    dumpAuthState(state);
+  }, [token, authInitialized, initializing]);
+  
+  // Log navigation changes
+  useEffect(() => {
+    logNavigation(segments.join('/'), 'Navigate');
+  }, [segments]);
 
   // Initialize auth state and theme on app startup
   useEffect(() => {
     const initialize = async () => {
       try {
+        logAuth('Starting app initialization');
+        
         // Initialize theme from storage first
         await dispatch(initializeTheme()).unwrap();
-        console.log('Theme initialized successfully');
+        logAuth('Theme initialized successfully');
         
         // Then initialize authentication from secure storage
-        await dispatch(initializeAuth()).unwrap();
-        console.log('Auth initialized successfully');
+        const authResult = await dispatch(initializeAuth()).unwrap();
+        logAuth('Auth initialized', authResult ? 'User found' : 'No user found');
+        
+        if (authResult) {
+          logAuth('Auth found in storage', { 
+            hasToken: !!authResult.token,
+            hasUser: !!authResult.user 
+          });
+        } else {
+          logAuth('No auth data found in storage');
+        }
       } catch (error) {
-        console.error('App initialization failed:', error);
+        logAuthError('App initialization failed', error);
       } finally {
+        logAuth('Completing initialization process');
         setInitializing(false);
       }
     };
@@ -60,17 +95,44 @@ function AppWrapper() {
     }
   }, [token, sessionExpiryTime, dispatch]);
 
-  // Redirect to login screen when logged out
+  // Handle navigation based on auth state
   useEffect(() => {
-    if (!initializing && !token) {
-      router.replace('/(auth)');
+    if (initializing) {
+      // Still loading, don't redirect yet
+      return;
     }
-  }, [token, initializing, router]);
+
+    // Get current route info for logging
+    const currentRoute = segments.join('/');
+    const inAuthGroup = isAuthGroup(segments);
+    
+    // Need to check if the user is logged in or not
+    if (authInitialized) {
+      if (!token) {
+        // No token, redirect to auth unless already there
+        if (!inAuthGroup && !hasRedirected.current) {
+          logAuth(`No token, redirecting from ${currentRoute} to login`);
+          hasRedirected.current = true;
+          router.replace('/(auth)');
+        }
+      } else {
+        // Has token, redirect to main app unless already there
+        if (inAuthGroup && !hasRedirected.current) {
+          logAuth(`Has token, redirecting from ${currentRoute} to main app`);
+          hasRedirected.current = true;
+          router.replace('/(tabs)');
+        }
+      }
+    } else {
+      logAuth(`Auth not yet initialized, waiting before navigation decisions`);
+    }
+  }, [token, initializing, authInitialized, router, segments]);
 
   // Handle app state changes to track activity
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active' && token) {
+        logAuth('App returned to foreground, updating activity');
         // User returned to the app - update activity time
         dispatch(updateActivity());
         // Also check if session has expired
@@ -92,9 +154,14 @@ function AppWrapper() {
     }
   };
 
-  // If still initializing, you could show a loading screen here
+  // If still initializing, show a loading screen
   if (initializing) {
-    return <Text style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>Loading...</Text>;
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.tint} />
+        <Text style={{ marginTop: 20, color: colors.text }}>Loading...</Text>
+      </View>
+    );
   }
 
   return (

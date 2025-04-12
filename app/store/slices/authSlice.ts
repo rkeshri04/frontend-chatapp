@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import axios from 'axios';
 import { Platform } from 'react-native';
+import { logAuth, logAuthError } from '../../../utils/authLogger';
 
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
@@ -18,7 +19,8 @@ interface AuthState {
   error: string | null;
   sessionExpiryTime: number | null;
   lastActivityTime: number | null;
-  showExpiryWarning: boolean; // New state to track when to show expiry warning
+  showExpiryWarning: boolean; 
+  initialized: boolean; // Track whether auth has been initialized
 }
 
 const initialState: AuthState = {
@@ -28,7 +30,8 @@ const initialState: AuthState = {
   error: null,
   sessionExpiryTime: null,
   lastActivityTime: null,
-  showExpiryWarning: false, // Initialize to false
+  showExpiryWarning: false,
+  initialized: false,
 };
 
 // Initialize auth state from secure storage - fix token handling
@@ -36,46 +39,58 @@ export const initializeAuth = createAsyncThunk(
   'auth/initialize',
   async (_, { dispatch }) => {
     try {
+      logAuth('Fetching auth data from secure storage');
       const token = await SecureStore.getItemAsync('token');
       const userJson = await SecureStore.getItemAsync('user');
       const sessionExpiryTimeStr = await SecureStore.getItemAsync('sessionExpiryTime');
       const lastActivityTimeStr = await SecureStore.getItemAsync('lastActivityTime');
       
       if (token && userJson) {
-        console.log('Found stored token and user data');
-        const user = JSON.parse(userJson);
-        const sessionExpiryTime = sessionExpiryTimeStr ? parseInt(sessionExpiryTimeStr) : null;
-        const lastActivityTime = lastActivityTimeStr ? parseInt(lastActivityTimeStr) : null;
-        
-        const now = Date.now();
-        
-        // Check if session has expired, but don't log out automatically - just return auth data
-        // and let the component handle expiry
-        if (sessionExpiryTime && now > sessionExpiryTime) {
-          console.log('Session expiry time has passed, but returning data for component handling');
+        logAuth('Found stored token and user data', { tokenLength: token.length });
+        try {
+          const user = JSON.parse(userJson);
+          const sessionExpiryTime = sessionExpiryTimeStr ? parseInt(sessionExpiryTimeStr) : null;
+          const lastActivityTime = lastActivityTimeStr ? parseInt(lastActivityTimeStr) : null;
+          
+          const now = Date.now();
+          
+          // Check if session has expired
+          if (sessionExpiryTime && now > sessionExpiryTime) {
+            logAuth('Session has expired, but returning data for component handling', {
+              expired: true,
+              expiryTime: new Date(sessionExpiryTime).toISOString()
+            });
+          }
+          
+          // Check for inactivity timeout
+          if (lastActivityTime && now - lastActivityTime > INACTIVITY_TIMEOUT) {
+            logAuth('Inactivity threshold reached, but returning data for component handling', {
+              inactive: true,
+              lastActivity: new Date(lastActivityTime).toISOString()
+            });
+          }
+          
+          // Update activity time
+          dispatch(updateActivity());
+          
+          // Start the session expiry check
+          dispatch(startSessionExpiryCheck());
+          
+          return { 
+            user, 
+            token,
+            sessionExpiryTime,
+            lastActivityTime
+          };
+        } catch (error) {
+          logAuthError('Error parsing stored user data', error);
+          return null;
         }
-        
-        // Check for inactivity timeout, but don't log out automatically
-        if (lastActivityTime && now - lastActivityTime > INACTIVITY_TIMEOUT) {
-          console.log('Inactivity threshold reached, but returning data for component handling');
-        }
-        
-        // Update activity time
-        dispatch(updateActivity());
-        
-        // Start the session expiry check
-        dispatch(startSessionExpiryCheck());
-        
-        return { 
-          user, 
-          token,
-          sessionExpiryTime,
-          lastActivityTime
-        };
       }
+      logAuth('No stored auth data found');
       return null;
     } catch (error) {
-      console.error('Error initializing auth:', error);
+      logAuthError('Error initializing auth', error);
       return null;
     }
   }
@@ -185,17 +200,36 @@ export const login = createAsyncThunk(
   }
 );
 
+// Define logout with specific handling to ensure tokens are completely removed
 export const logout = createAsyncThunk(
   'auth/logout',
   async (_, { rejectWithValue }) => {
     try {
+      logAuth('Logging out, clearing secure storage');
+      
       // Remove all auth-related items from secure storage
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
       await SecureStore.deleteItemAsync('sessionExpiryTime');
       await SecureStore.deleteItemAsync('lastActivityTime');
+      
+      // On iOS, make sure SecureStore is completely updated
+      if (Platform.OS === 'ios') {
+        // Verify deletion was successful
+        const tokenCheck = await SecureStore.getItemAsync('token');
+        if (tokenCheck) {
+          logAuthError('Failed to delete token from SecureStore', { tokenStillExists: true });
+          
+          // Try one more time with a slight delay
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await SecureStore.deleteItemAsync('token');
+        }
+      }
+      
+      logAuth('Logout successful, all auth data cleared');
       return true;
     } catch (error) {
+      logAuthError('Logout failed', error);
       return rejectWithValue('Logout failed');
     }
   }
@@ -370,41 +404,89 @@ const authSlice = createSlice({
     clearExpiryWarning: (state) => {
       state.showExpiryWarning = false;
     },
+    // Force refresh of auth state
+    forceRefresh: (state) => {
+      // This is just a trigger for the thunk
+    },
+    // Manually set initialized state (for testing purposes)
+    setInitialized: (state, action: PayloadAction<boolean>) => {
+      state.initialized = action.payload;
+    },
   },
   extraReducers: (builder) => {
     builder
       // Initialize auth
+      .addCase(initializeAuth.pending, (state) => {
+        logAuth('Auth initialization started');
+        state.initialized = false;
+        state.isLoading = true;
+      })
       .addCase(initializeAuth.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.initialized = true;
+        
         if (action.payload) {
+          logAuth('Auth initialization succeeded with user data');
           state.user = action.payload.user;
           state.token = action.payload.token;
           state.sessionExpiryTime = action.payload.sessionExpiryTime;
           state.lastActivityTime = action.payload.lastActivityTime;
+        } else {
+          logAuth('Auth initialization succeeded but no user data found');
+          // Clear any existing data to ensure a clean state
+          state.user = null;
+          state.token = null;
+          state.sessionExpiryTime = null;
+          state.lastActivityTime = null;
         }
       })
+      .addCase(initializeAuth.rejected, (state, action) => {
+        logAuthError('Auth initialization failed', action.error);
+        state.isLoading = false;
+        state.initialized = true;
+        state.error = 'Failed to initialize authentication';
+        // Don't clear existing auth data on error
+      })
+      
       // Login cases
       .addCase(login.pending, (state) => {
         state.isLoading = true;
         state.error = null;
       })
       .addCase(login.fulfilled, (state, action) => {
+        logAuth('Login successful');
         state.isLoading = false;
+        state.initialized = true; // Ensure initialized is true after login
         state.user = action.payload.user;
         state.token = action.payload.token;
         state.sessionExpiryTime = action.payload.sessionExpiryTime;
         state.lastActivityTime = action.payload.lastActivityTime;
       })
       .addCase(login.rejected, (state, action) => {
+        logAuthError('Login failed', action.payload);
         state.isLoading = false;
         state.error = action.payload as string;
       })
+      
       // Logout cases
+      .addCase(logout.pending, (state) => {
+        state.isLoading = true;
+      })
       .addCase(logout.fulfilled, (state) => {
+        logAuth('Logout successful, clearing state');
+        state.isLoading = false;
         state.user = null;
         state.token = null;
         state.sessionExpiryTime = null;
         state.lastActivityTime = null;
+        // Keep initialized as true since we know the auth state
       })
+      .addCase(logout.rejected, (state, action) => {
+        logAuthError('Logout failed', action.payload);
+        state.isLoading = false;
+        state.error = action.payload as string;
+      })
+      
       // Register cases
       .addCase(register.pending, (state) => {
         state.isLoading = true;
@@ -421,18 +503,21 @@ const authSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload as string;
       })
+      
       // Update activity
       .addCase(updateActivity.fulfilled, (state, action) => {
         if (action.payload) {
           state.lastActivityTime = action.payload;
         }
       })
+      
       // Handle session expiry check
       .addCase(checkSessionExpiry.fulfilled, (state, action) => {
         if (action.payload) {
           state.showExpiryWarning = action.payload.showWarning;
         }
       })
+      
       // Handle token validation
       .addCase(validateToken.rejected, (state) => {
         // If token validation fails, clear credentials
@@ -444,6 +529,6 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, clearCredentials, clearExpiryWarning } = authSlice.actions;
+export const { setCredentials, clearCredentials, clearExpiryWarning, setInitialized } = authSlice.actions;
 
 export default authSlice.reducer;

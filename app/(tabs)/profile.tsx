@@ -5,7 +5,7 @@ import { logout, updateActivity } from '../store/slices/authSlice';
 import { setThemeMode, saveTheme } from '../store/slices/themeSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { debugAuthToken, testAuthRequest, setQuickExpirySession } from '../../utils/authDebugger';
+import { debugAuthToken, testAuthRequest, setQuickExpirySession, testSecureStore, resetAuthInitialization } from '../../utils/authDebugger';
 import Constants from 'expo-constants';
 import { Colors } from '../../constants/Colors';
 
@@ -127,6 +127,21 @@ export default function ProfileScreen() {
     Alert.alert('Test Session Expiry', 'Session set to expire in 35 seconds. Warning should appear in 5 seconds.');
   };
 
+  // Add test function for SecureStore
+  const handleTestSecureStore = async () => {
+    const success = await testSecureStore();
+    Alert.alert(
+      'SecureStore Test', 
+      success ? 'SecureStore is working correctly!' : 'SecureStore test failed!'
+    );
+  };
+  
+  // Add function to reset auth initialization
+  const handleResetAuthInit = () => {
+    resetAuthInitialization();
+    Alert.alert('Auth Initialization', 'Auth initialization state has been reset.');
+  };
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
@@ -213,7 +228,7 @@ export default function ProfileScreen() {
       </View>
 
       {/* Add this section for debugging */}
-      {/* <View style={[styles.section, { backgroundColor: colors.card }]}>
+      <View style={[styles.section, { backgroundColor: colors.card }]}>
         <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleDebugAuth}>
           <Ionicons name="bug-outline" size={24} color={colors.tint} />
           <Text style={[styles.menuText, { color: colors.text }]}>Debug Authentication</Text>
@@ -225,7 +240,19 @@ export default function ProfileScreen() {
           <Text style={[styles.menuText, { color: colors.text }]}>Test Session Expiry</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.icon} />
         </TouchableOpacity>
-      </View> */}
+        
+        <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleTestSecureStore}>
+          <Ionicons name="key-outline" size={24} color={colors.tint} />
+          <Text style={[styles.menuText, { color: colors.text }]}>Test SecureStore</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.icon} />
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleResetAuthInit}>
+          <Ionicons name="refresh-outline" size={24} color={colors.tint} />
+          <Text style={[styles.menuText, { color: colors.text }]}>Reset Auth Init</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.icon} />
+        </TouchableOpacity>
+      </View>
       
       <TouchableOpacity 
         style={[styles.logoutButton, { backgroundColor: colors.card }]} 
