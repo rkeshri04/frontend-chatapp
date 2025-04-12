@@ -9,6 +9,7 @@ const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 // Session constants
 const SESSION_EXPIRE_TIME = 59 * 60 * 1000; // 59 minutes in milliseconds
 const INACTIVITY_TIMEOUT = 2 * 60 * 1000; // 2 minutes in milliseconds
+const EXPIRY_WARNING_TIME = 30 * 1000; // 30 seconds before expiry
 
 interface AuthState {
   user: any | null;
@@ -17,6 +18,7 @@ interface AuthState {
   error: string | null;
   sessionExpiryTime: number | null;
   lastActivityTime: number | null;
+  showExpiryWarning: boolean; // New state to track when to show expiry warning
 }
 
 const initialState: AuthState = {
@@ -26,6 +28,7 @@ const initialState: AuthState = {
   error: null,
   sessionExpiryTime: null,
   lastActivityTime: null,
+  showExpiryWarning: false, // Initialize to false
 };
 
 // Initialize auth state from secure storage - fix token handling
@@ -59,6 +62,9 @@ export const initializeAuth = createAsyncThunk(
         
         // Update activity time
         dispatch(updateActivity());
+        
+        // Start the session expiry check
+        dispatch(startSessionExpiryCheck());
         
         return { 
           user, 
@@ -265,26 +271,44 @@ export const checkSessionExpiry = createAsyncThunk(
       
       if (state.auth.token && state.auth.sessionExpiryTime) {
         const now = Date.now();
+        const timeUntilExpiry = state.auth.sessionExpiryTime - now;
+        
+        // Check if it's time to show expiry warning (30 seconds before expiry)
+        if (timeUntilExpiry <= EXPIRY_WARNING_TIME && timeUntilExpiry > 0) {
+          return { showWarning: true, expired: false };
+        }
         
         // Check if session has expired
-        if (now > state.auth.sessionExpiryTime) {
+        if (now >= state.auth.sessionExpiryTime) {
           console.log('Session expired, logging out');
           dispatch(logout());
-          return true;
+          return { showWarning: false, expired: true };
         }
         
         // Check for inactivity
         if (state.auth.lastActivityTime && now - state.auth.lastActivityTime > INACTIVITY_TIMEOUT) {
           console.log('User inactive, logging out');
           dispatch(logout());
-          return true;
+          return { showWarning: false, expired: true };
         }
       }
-      return false;
+      return { showWarning: false, expired: false };
     } catch (error) {
       console.error('Error checking session expiry:', error);
-      return false;
+      return { showWarning: false, expired: false };
     }
+  }
+);
+
+// Start regular checking of session expiry
+export const startSessionExpiryCheck = createAsyncThunk(
+  'auth/startSessionExpiryCheck',
+  async (_, { dispatch }) => {
+    // Initial check
+    dispatch(checkSessionExpiry());
+    
+    // We return nothing as this thunk just kicks off the process
+    return null;
   }
 );
 
@@ -341,6 +365,10 @@ const authSlice = createSlice({
       state.token = null;
       state.sessionExpiryTime = null;
       state.lastActivityTime = null;
+    },
+    // Clear the expiry warning
+    clearExpiryWarning: (state) => {
+      state.showExpiryWarning = false;
     },
   },
   extraReducers: (builder) => {
@@ -399,6 +427,12 @@ const authSlice = createSlice({
           state.lastActivityTime = action.payload;
         }
       })
+      // Handle session expiry check
+      .addCase(checkSessionExpiry.fulfilled, (state, action) => {
+        if (action.payload) {
+          state.showExpiryWarning = action.payload.showWarning;
+        }
+      })
       // Handle token validation
       .addCase(validateToken.rejected, (state) => {
         // If token validation fails, clear credentials
@@ -410,6 +444,6 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, clearCredentials } = authSlice.actions;
+export const { setCredentials, clearCredentials, clearExpiryWarning } = authSlice.actions;
 
 export default authSlice.reducer;

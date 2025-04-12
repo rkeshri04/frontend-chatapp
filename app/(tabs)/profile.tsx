@@ -4,7 +4,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout, updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
-import { debugAuthToken, testAuthRequest } from '../../utils/authDebugger';
+import { debugAuthToken, testAuthRequest, setQuickExpirySession } from '../../utils/authDebugger';
 import Constants from 'expo-constants';
 
 export default function ProfileScreen() {
@@ -81,6 +81,12 @@ export default function ProfileScreen() {
     dispatch(updateActivity());
   };
 
+  // Add test function for session expiry
+  const handleTestSessionExpiry = async () => {
+    await setQuickExpirySession(35); // Set session to expire in 35 seconds (warning at 5s)
+    Alert.alert('Test Session Expiry', 'Session set to expire in 35 seconds. Warning should appear in 5 seconds.');
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -140,6 +146,12 @@ export default function ProfileScreen() {
         <TouchableOpacity style={styles.menuItem} onPress={handleDebugAuth}>
           <Ionicons name="bug-outline" size={24} color="#007AFF" />
           <Text style={styles.menuText}>Debug Authentication</Text>
+          <Ionicons name="chevron-forward" size={20} color="#ccc" />
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={styles.menuItem} onPress={handleTestSessionExpiry}>
+          <Ionicons name="time-outline" size={24} color="#007AFF" />
+          <Text style={styles.menuText}>Test Session Expiry</Text>
           <Ionicons name="chevron-forward" size={20} color="#ccc" />
         </TouchableOpacity>
       </View>

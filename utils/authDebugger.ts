@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { store } from '../app/store/store';
 
 /**
  * Debug function to check the auth token status
@@ -37,8 +38,13 @@ export const debugAuthToken = async () => {
       const now = Date.now();
       const timeLeft = expiryTime - now;
       console.log('Session expiry found:', new Date(expiryTime).toLocaleString());
-      console.log('Time until expiry:', Math.floor(timeLeft / 60000), 'minutes');
+      console.log('Time until expiry:', Math.floor(timeLeft / 60000), 'minutes', Math.floor((timeLeft % 60000) / 1000), 'seconds');
       console.log('Session expired:', timeLeft <= 0);
+      
+      // Check session warning state
+      const state = store.getState();
+      console.log('Show warning flag:', state.auth.showExpiryWarning);
+      console.log('Should show warning:', timeLeft <= 30000 && timeLeft > 0);
     } else {
       console.log('No session expiry info found');
     }
@@ -50,7 +56,7 @@ export const debugAuthToken = async () => {
       const now = Date.now();
       const idleTime = now - lastActivity;
       console.log('Last activity:', new Date(lastActivity).toLocaleString());
-      console.log('Idle time:', Math.floor(idleTime / 60000), 'minutes');
+      console.log('Idle time:', Math.floor(idleTime / 60000), 'minutes', Math.floor((idleTime % 60000) / 1000), 'seconds');
     } else {
       console.log('No activity time info found');
     }
@@ -106,5 +112,42 @@ export const testAuthRequest = async (apiUrl: string) => {
     console.log('===================================');
   } catch (error) {
     console.error('Error in auth test:', error);
+  }
+};
+
+/**
+ * Set a session that will expire in the specified number of seconds
+ * This is useful for testing expiry behavior
+ */
+export const setQuickExpirySession = async (secondsUntilExpiry: number = 35) => {
+  try {
+    console.log(`Setting test session to expire in ${secondsUntilExpiry} seconds`);
+    
+    // Get current token and user
+    const token = await SecureStore.getItemAsync('token');
+    const userJson = await SecureStore.getItemAsync('user');
+    
+    if (!token || !userJson) {
+      console.log('No active session to modify');
+      return;
+    }
+    
+    // Set expiry time to be X seconds from now
+    const expiryTime = Date.now() + (secondsUntilExpiry * 1000);
+    await SecureStore.setItemAsync('sessionExpiryTime', expiryTime.toString());
+    
+    // Update activity time
+    await SecureStore.setItemAsync('lastActivityTime', Date.now().toString());
+    
+    console.log('Quick expiry session set - expiry at:', new Date(expiryTime).toLocaleTimeString());
+    console.log('Warning should appear in:', secondsUntilExpiry - 30, 'seconds');
+    
+    // Force refresh the Redux state by reloading
+    store.dispatch({ type: 'auth/forceRefresh' });
+    
+    return true;
+  } catch (error) {
+    console.error('Error setting quick expiry session:', error);
+    return false;
   }
 };

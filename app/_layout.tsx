@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Slot } from 'expo-router';
+import { Slot, useRouter } from 'expo-router';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
 import { useAppDispatch, useAppSelector } from './store/hooks';
-import { initializeAuth, checkSessionExpiry, updateActivity, logout, validateToken } from './store/slices/authSlice';
-import { TouchableWithoutFeedback, AppState, AppStateStatus, Text } from 'react-native';
+import { initializeAuth, checkSessionExpiry, updateActivity, logout } from './store/slices/authSlice';
+import { TouchableWithoutFeedback, AppState, AppStateStatus, Text, View } from 'react-native';
+import SessionExpiryNotification from '../components/SessionExpiryNotification';
 
 // Function to wrap the app with Redux Provider
 export function RootLayoutNav() {
@@ -18,6 +19,7 @@ export function RootLayoutNav() {
 // Component to handle auth state and session management
 function AppWrapper() {
   const dispatch = useAppDispatch();
+  const router = useRouter();
   const token = useAppSelector(state => state.auth.token);
   const sessionExpiryTime = useAppSelector(state => state.auth.sessionExpiryTime);
   const [initializing, setInitializing] = useState(true);
@@ -39,23 +41,24 @@ function AppWrapper() {
     initAuth();
   }, [dispatch]);
 
-  // Set up session expiry timer but don't automatically log out
+  // Set up session expiry check at more frequent intervals (every 5 seconds)
   useEffect(() => {
     if (token && sessionExpiryTime) {
-      // Check session every minute
+      // Check session every 5 seconds to ensure we can show the 30-second warning
       const sessionTimer = setInterval(() => {
-        const now = Date.now();
-        if (now > sessionExpiryTime) {
-          console.log('Session expiry detected in timer');
-          // Don't automatically log out - just log the event
-          // This allows the user to continue if they're actively using the app
-          // Components can check session status themselves
-        }
-      }, 60000);
+        dispatch(checkSessionExpiry());
+      }, 5000);
 
       return () => clearInterval(sessionTimer);
     }
   }, [token, sessionExpiryTime, dispatch]);
+
+  // Redirect to login screen when logged out
+  useEffect(() => {
+    if (!initializing && !token) {
+      router.replace('/(auth)');
+    }
+  }, [token, initializing, router]);
 
   // Handle app state changes to track activity
   useEffect(() => {
@@ -89,7 +92,10 @@ function AppWrapper() {
 
   return (
     <TouchableWithoutFeedback onPress={handleUserInteraction}>
-      <Slot />
+      <View style={{ flex: 1 }}>
+        <SessionExpiryNotification />
+        <Slot />
+      </View>
     </TouchableWithoutFeedback>
   );
 }
