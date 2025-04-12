@@ -1,22 +1,21 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, useColorScheme, Alert } from 'react-native';
+import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { ThemedText } from '@/app-example/components/ThemedText';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchConversations, setCurrentChat } from '../store/slices/chatSlice';
 import { updateActivity, logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../../constants/Colors';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 export default function TabOneScreen() {
   const chats = useAppSelector(state => state.chat.chats);
   const isLoading = useAppSelector(state => state.chat.isLoading);
   const error = useAppSelector(state => state.chat.error);
   const token = useAppSelector(state => state.auth.token);
+  const { colors } = useAppTheme();
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
   const [refreshing, setRefreshing] = useState(false);
   const [authError, setAuthError] = useState(false);
 

@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useColorScheme, ActivityIndicator } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, fetchChatMessages } from '../store/slices/chatSlice';
 import { updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../../constants/Colors';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
@@ -13,8 +13,7 @@ export default function ChatScreen() {
   const [isSending, setIsSending] = useState(false);
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const { colors, colorScheme } = useAppTheme();
   const flatListRef = useRef<FlatList>(null);
   
   const chat = useAppSelector(state => 

@@ -1,39 +1,40 @@
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View, Alert, useColorScheme, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { login } from '../store/slices/authSlice';
-import { Colors } from '../../constants/Colors';
+import { useAppTheme } from '../hooks/useAppTheme';
 
-export default function Login() {
+export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const dispatch = useAppDispatch();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const dispatch = useAppDispatch();
   const isLoading = useAppSelector(state => state.auth.isLoading);
+  const error = useAppSelector(state => state.auth.error);
+  const { colors, colorScheme } = useAppTheme();
 
   const handleLogin = async () => {
     // Reset previous error
-    setErrorMessage(null);
-    
+    if (error) {
+      Alert.alert('Error', error);
+    }
+
     // Form validation
     if (!email) {
-      setErrorMessage('Email is required');
+      Alert.alert('Error', 'Email is required');
       return;
     }
-    
+
     if (!password) {
-      setErrorMessage('Password is required');
+      Alert.alert('Error', 'Password is required');
       return;
     }
-    
+
     // Simple email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setErrorMessage('Please enter a valid email address');
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
@@ -45,7 +46,7 @@ export default function Login() {
       }
     } catch (error) {
       // Show the error from the server
-      setErrorMessage(error as string);
+      Alert.alert('Error', error as string);
       console.log('Login error caught:', error);
     }
   };
@@ -54,63 +55,49 @@ export default function Login() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.text }]}>Chat App</Text>
       <Text style={[styles.subtitle, { color: colors.icon }]}>Sign in to your account</Text>
-      
-      {errorMessage && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      )}
-      
+
       <View style={styles.inputContainer}>
         <TextInput
           style={[
-            styles.input, 
-            { 
-              borderColor: colorScheme === 'dark' ? '#333' : '#ddd', 
-              color: colors.text 
+            styles.input,
+            {
+              borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
+              color: colors.text,
             },
-            errorMessage && !email ? { borderColor: '#FF3B30' } : null
           ]}
           placeholder="Email"
           value={email}
-          onChangeText={(text) => {
-            setEmail(text);
-            if (errorMessage) setErrorMessage(null);
-          }}
+          onChangeText={(text) => setEmail(text)}
           autoCapitalize="none"
           keyboardType="email-address"
           placeholderTextColor={colors.icon}
           editable={!isLoading}
           autoCorrect={false}
         />
-        
+
         <TextInput
           style={[
-            styles.input, 
-            { 
-              borderColor: colorScheme === 'dark' ? '#333' : '#ddd', 
-              color: colors.text 
+            styles.input,
+            {
+              borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
+              color: colors.text,
             },
-            errorMessage && !password ? { borderColor: '#FF3B30' } : null
           ]}
           placeholder="Password"
           value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            if (errorMessage) setErrorMessage(null);
-          }}
+          onChangeText={(text) => setPassword(text)}
           secureTextEntry
           placeholderTextColor={colors.icon}
           editable={!isLoading}
         />
       </View>
-      
-      <TouchableOpacity 
+
+      <TouchableOpacity
         style={[
-          styles.button, 
+          styles.button,
           { backgroundColor: colors.tint },
-          isLoading ? { opacity: 0.7 } : null
-        ]} 
+          isLoading ? { opacity: 0.7 } : null,
+        ]}
         onPress={handleLogin}
         disabled={isLoading}
       >
@@ -120,7 +107,7 @@ export default function Login() {
           <Text style={styles.buttonText}>Sign In</Text>
         )}
       </TouchableOpacity>
-      
+
       <View style={styles.footer}>
         <Text style={{ color: colors.text }}>Don't have an account? </Text>
         <TouchableOpacity onPress={() => router.push('/(auth)/register')} disabled={isLoading}>
@@ -176,16 +163,5 @@ const styles = StyleSheet.create({
   },
   linkText: {
     fontWeight: 'bold',
-  },
-  errorContainer: {
-    backgroundColor: 'rgba(255, 59, 48, 0.1)',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 15,
-  },
-  errorText: {
-    color: '#FF3B30',
-    fontSize: 14,
-    textAlign: 'center',
   },
 });

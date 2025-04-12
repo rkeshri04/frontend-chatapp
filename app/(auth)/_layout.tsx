@@ -1,23 +1,36 @@
-import { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { useAppSelector } from '../store/hooks';
-import { useRouter } from 'expo-router';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 export default function AuthLayout() {
-  const token = useAppSelector(state => state.auth.token);
-  const router = useRouter();
-  
-  // Redirect to tabs if already authenticated
-  useEffect(() => {
-    if (token) {
-      router.replace('/(tabs)');
-    }
-  }, [token, router]);
-  
+  const { colors } = useAppTheme();
+
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="register" />
+    <Stack
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: colors.background,
+        },
+        headerTintColor: colors.text,
+        contentStyle: {
+          backgroundColor: colors.background,
+        },
+        headerShadowVisible: false, // Remove shadow under header
+      }}
+    >
+      <Stack.Screen
+        name="index"
+        options={{
+          headerTitle: "Sign In",
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="signup"
+        options={{
+          headerTitle: "Create Account",
+          headerShown: true,
+        }}
+      />
     </Stack>
   );
 }
