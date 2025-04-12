@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, fetchChatMessages } from '../store/slices/chatSlice';
+import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations } from '../store/slices/chatSlice';
 import { updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
@@ -31,7 +31,8 @@ export default function ChatScreen() {
   const error = useAppSelector(state => state.chat.error);
   
   useEffect(() => {
-    // Load conversations if not already loaded
+    // Load conversations if chat data isn't already in the store (e.g., deep link)
+    // This might be less common now but good as a fallback.
     if (!chat) {
       dispatch(fetchConversations());
     }
@@ -40,17 +41,12 @@ export default function ChatScreen() {
       dispatch(setCurrentChat(id as string));
       // Update activity timestamp when entering chat
       dispatch(updateActivity());
-      
-      // Load messages for the chat if it exists and has no messages
-      if (chat && chat.messages.length === 0) {
-        dispatch(fetchChatMessages(id as string));
-      }
     }
     
     return () => {
       dispatch(clearCurrentChat());
     };
-  }, [id, dispatch, chat]);
+  }, [id, dispatch, chat]); // Keep chat dependency to re-run if chat data loads later
   
   useEffect(() => {
     // Scroll to bottom when messages change

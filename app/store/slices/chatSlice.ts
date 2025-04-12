@@ -44,10 +44,8 @@ const initialState: ChatState = {
 
 // Helper function to get authorization headers
 const getAuthHeaders = async (state) => {
-  // Try to get token from Redux state first
   let token = state?.auth?.token;
   
-  // If not in Redux state, try SecureStore
   if (!token) {
     token = await SecureStore.getItemAsync('token');
   }
@@ -56,10 +54,6 @@ const getAuthHeaders = async (state) => {
     throw new Error('Not authenticated');
   }
   
-  // Log token type and first few characters for debugging
-  console.log(`Token type: ${typeof token}, length: ${token.length}, starts with: ${token.substring(0, 10)}...`);
-  
-  // Make sure token doesn't already have Bearer prefix
   const authToken = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
   
   return {
@@ -72,40 +66,23 @@ export const fetchConversations = createAsyncThunk(
   'chat/fetchConversations',
   async (_, { rejectWithValue, getState, dispatch }) => {
     try {
-      // Get auth headers
       const headers = await getAuthHeaders(getState());
-      
-      // Log request info for debugging
-      console.log(`Fetching conversations from: ${API_URL}/chat/conversations`);
       
       const response = await axios.get(`${API_URL}/chat/conversations/`, { headers });
       
-      console.log('Conversations fetch successful:', response.status);
-      
-      // Check the actual structure of the response to better adapt the transformation
-      console.log('Response data structure:', typeof response.data, Array.isArray(response.data) ? 'is array' : 'not array');
-      
-      // Transform the new conversation format
       let conversations = [];
       
       if (Array.isArray(response.data)) {
         conversations = response.data.map(conversation => ({
           id: conversation.id || String(Math.random()),
           name: conversation.other_user?.username || 'Unknown',
-          // Use empty string if no last message yet
           lastMessage: conversation.last_message?.content || '',
           unreadCount: conversation.unread_count || 0,
-          // Initialize with empty messages array - these will be loaded when the chat is opened
           messages: [],
-          // Store the other user info for reference
           otherUser: conversation.other_user || null,
           status: conversation.status || 'pending'
         }));
       } else if (typeof response.data === 'object' && response.data !== null) {
-        // Handle case where API returns an object instead of array
-        console.log('API returned object instead of array, exploring structure:', Object.keys(response.data));
-        
-        // Try to find conversations in a nested property if exists
         const conversationsData = response.data.conversations || response.data.data || response.data.results || [];
         
         if (Array.isArray(conversationsData)) {
@@ -118,32 +95,18 @@ export const fetchConversations = createAsyncThunk(
             otherUser: conversation.other_user || null,
             status: conversation.status || 'pending'
           }));
-        } else {
-          console.log('Could not find conversations array in response');
         }
       }
       
-      console.log(`Transformed ${conversations.length} conversations`);
       return conversations;
     } catch (error) {
-      console.error('Error fetching conversations:', error);
-      
-      // Add detailed error logging
       if (axios.isAxiosError(error)) {
-        // Do not log complete token from headers for security
         const sanitizedHeaders = { ...error.config?.headers };
         if (sanitizedHeaders.Authorization) {
           sanitizedHeaders.Authorization = sanitizedHeaders.Authorization.substring(0, 15) + '...';
         }
         
-        console.log('Request details:', {
-          url: error.config?.url,
-          method: error.config?.method,
-          headers: sanitizedHeaders
-        });
-        
         if (error.response?.status === 401) {
-          // Don't automatically log out - allow user to retry or manually log out
           return rejectWithValue('Authentication failed. Please check your internet connection and try again.');
         }
         
@@ -158,21 +121,14 @@ export const sendMessage = createAsyncThunk(
   'chat/sendMessage',
   async ({ chatId, text }: { chatId: string, text: string }, { rejectWithValue, getState }) => {
     try {
-      // Get auth headers
       const headers = await getAuthHeaders(getState());
       
-      console.log(`Sending message to chat ${chatId}`);
-      
-      // Send message to the backend
       const response = await axios.post(
         `${API_URL}/chat/conversations/${chatId}/messages`,
         { content: text },
         { headers }
       );
       
-      console.log('Message sent successfully:', response.status);
-      
-      // Return properly formatted data
       return {
         chatId,
         message: {
@@ -183,8 +139,6 @@ export const sendMessage = createAsyncThunk(
         }
       };
     } catch (error) {
-      console.error('Error sending message:', error);
-      
       if (axios.isAxiosError(error) && error.response?.status === 401) {
         return rejectWithValue('Authentication failed. Your session may have expired.');
       }
@@ -199,14 +153,12 @@ export const createConversation = createAsyncThunk(
   'chat/createConversation',
   async ({ recipientId, initialMessage }: { recipientId: string, initialMessage: string }, { rejectWithValue }) => {
     try {
-      // Get the auth token from secure storage
       const token = await SecureStore.getItemAsync('token');
       
       if (!token) {
         return rejectWithValue('Authentication token not found');
       }
       
-      // Create a new conversation with the recipient
       const response = await axios.post(
         `${API_URL}/chat/conversations`, 
         { 
@@ -220,12 +172,10 @@ export const createConversation = createAsyncThunk(
         }
       );
       
-      // Check if the response contains the conversation data
       if (!response.data || !response.data.id) {
         return rejectWithValue('Failed to create conversation: Invalid response');
       }
       
-      // Format the response to match our Chat interface
       const conversation = {
         id: response.data.id,
         name: response.data.recipient_name || 'User',
@@ -243,7 +193,6 @@ export const createConversation = createAsyncThunk(
       
       return conversation;
     } catch (error) {
-      console.error('Error creating conversation:', error);
       if (axios.isAxiosError(error)) {
         return rejectWithValue(error.response?.data?.detail || 'Failed to create conversation');
       }
@@ -252,51 +201,108 @@ export const createConversation = createAsyncThunk(
   }
 );
 
-// Fetch chat messages
+// Fetch chat messages using conversation code
 export const fetchChatMessages = createAsyncThunk(
   'chat/fetchChatMessages',
-  async (chatId: string, { rejectWithValue, getState }) => {
+  async ({ chatId, code }: { chatId: string, code: string }, { rejectWithValue, getState }) => {
     try {
-      // Get auth headers
-      const headers = await getAuthHeaders(getState());
+      // Get auth headers (includes Authorization)
+      const baseHeaders = await getAuthHeaders(getState());
       
-      console.log(`Fetching messages for chat ${chatId}`);
+      const headers = {
+        ...baseHeaders,
+        'X-Convo-Code': code // Add the conversation code header
+      };
       
+      console.log(`Fetching messages for chat ${chatId} using code`);
+      
+      // Use the new endpoint
       const response = await axios.get(
-        `${API_URL}/chat/conversations/${chatId}/messages/`,
+        `${API_URL}/chat/messages/conversation/${chatId}/with-code`, 
         { headers }
       );
       
       console.log('Messages fetch successful:', response.status);
       
-      // Transform the messages to our format
+      // Transform the messages to our format (assuming the response structure is similar)
       let messages: Message[] = [];
       
+      // Adjust based on actual API response structure if needed
       if (Array.isArray(response.data)) {
         messages = response.data.map(msg => ({
           id: msg.id || String(Math.random()),
           text: msg.content || '',
-          sender: msg.is_sender ? 'me' : 'other',
+          // Determine sender based on your user ID or a flag from the backend
+          // Assuming backend provides `is_sender` or similar
+          sender: msg.is_sender ? 'me' : 'other', 
           timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now()
-        }));
+        })).sort((a, b) => a.timestamp - b.timestamp); // Ensure messages are sorted by time
       } else if (response.data.messages && Array.isArray(response.data.messages)) {
-        messages = response.data.messages.map(msg => ({
+         messages = response.data.messages.map(msg => ({
           id: msg.id || String(Math.random()),
           text: msg.content || '',
           sender: msg.is_sender ? 'me' : 'other',
           timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now()
-        }));
+        })).sort((a, b) => a.timestamp - b.timestamp); // Ensure messages are sorted by time
+      } else {
+        console.warn('Unexpected response structure for messages:', response.data);
       }
       
       return { chatId, messages };
     } catch (error) {
       console.error('Error fetching messages:', error);
       
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        return rejectWithValue('Authentication failed. Your session may have expired.');
+      if (axios.isAxiosError(error)) {
+         if (error.response?.status === 401) {
+          return rejectWithValue('Authentication failed. Your session may have expired.');
+        }
+         if (error.response?.status === 403 || error.response?.status === 404) {
+           // Handle cases where the code might be wrong or convo not found
+           return rejectWithValue('Failed to load messages. Invalid code or conversation not found.');
+         }
+        return rejectWithValue(error.response?.data?.detail || 'Failed to load messages. Please try again.');
       }
       
-      return rejectWithValue('Failed to load messages. Please try again.');
+      return rejectWithValue('Network error. Please check your connection.');
+    }
+  }
+);
+
+// Verify conversation code
+export const verifyConversationCode = createAsyncThunk(
+  'chat/verifyConversationCode',
+  async ({ chatId, code }: { chatId: string, code: string }, { rejectWithValue, getState }) => {
+    try {
+      const headers = await getAuthHeaders(getState());
+      
+      const response = await axios.post(
+        `${API_URL}/chat/conversations/${chatId}/verify-code`,
+        {}, 
+        { 
+          headers: {
+            ...headers,
+            'X-Convo-Code': code 
+          }
+        }
+      );
+      
+      if (response.data && response.data.valid === true) {
+        return { chatId };
+      } else {
+        return rejectWithValue('Invalid code'); 
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          return rejectWithValue('Authentication failed. Your session may have expired.');
+        }
+        if (error.response?.data?.valid === false || error.response?.data?.detail === 'Invalid code') {
+          return rejectWithValue('Invalid code');
+        }
+        return rejectWithValue(error.response?.data?.detail || 'Failed to verify code');
+      }
+      
+      return rejectWithValue('Network error. Please check your connection.');
     }
   }
 );
@@ -307,7 +313,6 @@ const chatSlice = createSlice({
   reducers: {
     setCurrentChat: (state, action: PayloadAction<string>) => {
       state.currentChatId = action.payload;
-      // Reset unread count when opening chat
       const chat = state.chats.find(c => c.id === action.payload);
       if (chat) {
         chat.unreadCount = 0;
@@ -324,7 +329,6 @@ const chatSlice = createSlice({
         chat.messages.push(message);
         chat.lastMessage = message.text;
         
-        // If this isn't the current chat, increment unread
         if (state.currentChatId !== chatId) {
           chat.unreadCount += 1;
         }
@@ -333,7 +337,6 @@ const chatSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      // Handle fetchConversations
       .addCase(fetchConversations.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -346,7 +349,6 @@ const chatSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload as string;
       })
-      // Handle sendMessage
       .addCase(sendMessage.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -365,21 +367,19 @@ const chatSlice = createSlice({
         state.isLoading = false;
         state.error = action.payload as string;
       })
-      // Handle createConversation
       .addCase(createConversation.pending, (state) => {
         state.isLoading = true;
         state.error = null;
       })
       .addCase(createConversation.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.chats.unshift(action.payload); // Add to the beginning of the chats array
+        state.chats.unshift(action.payload);
         state.currentChatId = action.payload.id;
       })
       .addCase(createConversation.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
       })
-      // Handle fetchChatMessages
       .addCase(fetchChatMessages.pending, (state) => {
         state.isLoading = true;
         state.error = null;
@@ -396,6 +396,9 @@ const chatSlice = createSlice({
       .addCase(fetchChatMessages.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
+      })
+      .addCase(verifyConversationCode.rejected, (state, action) => {
+        console.log('Verification rejected in slice:', action.payload);
       });
   },
 });

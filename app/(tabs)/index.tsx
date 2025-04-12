@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Modal, TextInput, Pressable } from 'react-native';
 import { ThemedText } from '@/app-example/components/ThemedText';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchConversations, setCurrentChat } from '../store/slices/chatSlice';
+import { fetchConversations, setCurrentChat, verifyConversationCode, fetchChatMessages } from '../store/slices/chatSlice';
 import { updateActivity, logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
@@ -26,6 +26,14 @@ export default function TabOneScreen() {
   const { colors, colorScheme } = useAppTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [authError, setAuthError] = useState(false);
+
+  // State for verification modal
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [enteredCode, setEnteredCode] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [showCode, setShowCode] = useState(false);
 
   // Fetch conversations when component mounts
   useEffect(() => {
@@ -66,9 +74,65 @@ export default function TabOneScreen() {
   };
 
   const handleChatPress = (chatId: string) => {
-    dispatch(setCurrentChat(chatId));
-    dispatch(updateActivity());
-    router.push(`../chat/${chatId}`);
+    // Instead of navigating directly, open the verification modal
+    setSelectedChatId(chatId);
+    setEnteredCode(''); // Clear previous code
+    setVerificationError(null); // Clear previous error
+    setIsVerifying(false); // Reset loading state
+    setShowCode(false); // Hide code initially
+    setModalVisible(true);
+    dispatch(updateActivity()); // Update activity when interaction starts
+  };
+
+  const handleVerifyCode = async () => {
+    if (!selectedChatId || !enteredCode.trim()) {
+      setVerificationError('Please enter the code.');
+      return;
+    }
+
+    setIsVerifying(true);
+    setVerificationError(null);
+    dispatch(updateActivity()); // Update activity on verification attempt
+
+    try {
+      // Dispatch the verification thunk
+      const resultAction = await dispatch(verifyConversationCode({ chatId: selectedChatId, code: enteredCode.trim() }));
+
+      // Check if the thunk fulfilled successfully
+      if (verifyConversationCode.fulfilled.match(resultAction)) {
+        const { chatId } = resultAction.payload;
+        const verifiedCode = enteredCode.trim(); // Store the verified code
+        console.log(`Code verified for chat ${chatId}. Fetching messages and navigating.`);
+        
+        // Code is valid, fetch messages first, passing the verified code
+        await dispatch(fetchChatMessages({ chatId, code: verifiedCode })).unwrap(); // Pass code here
+        
+        // Close modal and navigate
+        setModalVisible(false);
+        router.push(`../chat/${chatId}`);
+      } else {
+        // Handle rejection (invalid code or other errors from thunk)
+        let errorMessage = 'Verification failed. Please try again.';
+        if (resultAction.payload === 'Invalid code') {
+          errorMessage = 'Invalid code. Please check and try again.';
+        } else if (typeof resultAction.payload === 'string') {
+          errorMessage = resultAction.payload; // Use error message from thunk
+        }
+        console.error('Verification failed:', errorMessage);
+        setVerificationError(errorMessage);
+      }
+    } catch (err: any) {
+      // Catch errors not handled by rejectWithValue (e.g., network issues before API call)
+      console.error('An unexpected error occurred during verification:', err);
+      setVerificationError('An error occurred. Please check your connection and try again.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const closeModal = () => {
+    setModalVisible(false);
+    setSelectedChatId(null);
   };
 
   const renderChatItem = ({ item }: { item: ChatItem }) => {
@@ -218,8 +282,68 @@ export default function TabOneScreen() {
         >
           <Ionicons name="create-outline" size={24} color="#fff" />
         </TouchableOpacity>
-      </View>
 
+        {/* Verification Modal */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={closeModal}
+        >
+          <View style={styles.modalCenteredView}>
+            <View style={[styles.modalView, { backgroundColor: colors.card }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Enter Conversation Code</Text>
+              <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
+                Please enter the code provided to access this conversation.
+              </Text>
+              
+              <View style={[styles.inputContainer, { borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.modalInput, { color: colors.text }]}
+                  placeholder="Enter code..."
+                  placeholderTextColor={colors.icon}
+                  value={enteredCode}
+                  onChangeText={setEnteredCode}
+                  secureTextEntry={!showCode}
+                  autoCapitalize="none"
+                  editable={!isVerifying}
+                />
+                <TouchableOpacity onPress={() => setShowCode(!showCode)} style={styles.eyeIcon}>
+                  <Ionicons 
+                    name={showCode ? "eye-off-outline" : "eye-outline"} 
+                    size={24} 
+                    color={colors.icon} 
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {verificationError && (
+                <Text style={styles.modalErrorText}>{verificationError}</Text>
+              )}
+
+              {isVerifying ? (
+                <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
+              ) : (
+                <View style={styles.modalButtonContainer}>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: 'gray' }]}
+                    onPress={closeModal}
+                  >
+                    <Text style={styles.modalButtonText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: colors.tint }]}
+                    onPress={handleVerifyCode}
+                    disabled={!enteredCode.trim()}
+                  >
+                    <Text style={styles.modalButtonText}>Verify</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      </View>
     </>
   );
 }
@@ -392,5 +516,85 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 10,
     fontSize: 16,
+  },
+  // Modal Styles
+  modalCenteredView: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalView: {
+    margin: 20,
+    borderRadius: 20,
+    padding: 35,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    width: '85%',
+  },
+  modalTitle: {
+    marginBottom: 8,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    marginBottom: 15,
+    textAlign: "center",
+    fontSize: 14,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 15,
+    width: '100%',
+  },
+  modalInput: {
+    flex: 1,
+    height: 45,
+    paddingHorizontal: 15,
+    fontSize: 16,
+  },
+  eyeIcon: {
+    padding: 10,
+  },
+  modalErrorText: {
+    color: 'red',
+    marginBottom: 15,
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 10,
+  },
+  modalButton: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    elevation: 2,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    textAlign: "center",
+    fontSize: 16,
+  },
+  modalSpinner: {
+    marginTop: 15,
+    marginBottom: 15,
   },
 });
