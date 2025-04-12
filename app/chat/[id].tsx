@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useColorScheme } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, useColorScheme, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { sendMessage, setCurrentChat, clearCurrentChat } from '../store/slices/chatSlice';
+import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, fetchChatMessages } from '../store/slices/chatSlice';
 import { updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
@@ -10,37 +10,64 @@ import { Colors } from '../../constants/Colors';
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
   const [message, setMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const flatListRef = useRef<FlatList>(null);
   
   const chat = useAppSelector(state => 
     state.chat.chats.find(c => c.id === id)
   );
   
+  const isLoading = useAppSelector(state => state.chat.isLoading);
+  const error = useAppSelector(state => state.chat.error);
+  
   useEffect(() => {
+    // Load conversations if not already loaded
+    if (!chat) {
+      dispatch(fetchConversations());
+    }
+
     if (id) {
       dispatch(setCurrentChat(id as string));
       // Update activity timestamp when entering chat
       dispatch(updateActivity());
+      
+      // Load messages for the chat if it exists and has no messages
+      if (chat && chat.messages.length === 0) {
+        dispatch(fetchChatMessages(id as string));
+      }
     }
     
     return () => {
       dispatch(clearCurrentChat());
     };
-  }, [id, dispatch]);
+  }, [id, dispatch, chat]);
+  
+  useEffect(() => {
+    // Scroll to bottom when messages change
+    if (chat?.messages?.length) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 200);
+    }
+  }, [chat?.messages]);
   
   const handleSend = async () => {
     if (!message.trim() || !id) return;
     
     try {
+      setIsSending(true);
       // Update activity on message send
       dispatch(updateActivity());
       await dispatch(sendMessage({ chatId: id as string, text: message.trim() })).unwrap();
       setMessage('');
     } catch (error) {
       console.error('Failed to send message:', error);
+    } finally {
+      setIsSending(false);
     }
   };
   
@@ -49,6 +76,28 @@ export default function ChatScreen() {
     dispatch(updateActivity());
     setMessage(text);
   };
+  
+  if (isLoading && !chat) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.tint} />
+      </View>
+    );
+  }
+  
+  if (error && !chat) {
+    return (
+      <View style={[styles.errorContainer, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.text }}>{error}</Text>
+        <TouchableOpacity 
+          style={[styles.retryButton, { backgroundColor: colors.tint }]} 
+          onPress={() => dispatch(fetchConversations())}
+        >
+          <Text style={{ color: 'white' }}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
   
   if (!chat) {
     return (
@@ -94,12 +143,18 @@ export default function ChatScreen() {
           headerBackTitle: 'Back',
           headerStyle: {
             backgroundColor: colors.background,
+            height: 80, // Make header shorter
+          },
+          headerTitleStyle: {
+            fontSize: 18,
           },
           headerTintColor: colors.text,
+          headerShadowVisible: false, // Remove the bottom shadow
         }} 
       />
       
       <FlatList
+        ref={flatListRef}
         data={chat.messages}
         keyExtractor={(item) => item.id}
         renderItem={renderMessage}
@@ -129,18 +184,25 @@ export default function ChatScreen() {
           onChangeText={handleTyping}
           multiline
           placeholderTextColor={colors.icon}
+          editable={!isSending}
         />
-        <TouchableOpacity 
-          style={styles.sendButton} 
-          onPress={handleSend}
-          disabled={!message.trim()}
-        >
-          <Ionicons 
-            name="send" 
-            size={24} 
-            color={message.trim() ? colors.tint : colors.icon} 
-          />
-        </TouchableOpacity>
+        {isSending ? (
+          <View style={styles.sendButton}>
+            <ActivityIndicator size="small" color={colors.tint} />
+          </View>
+        ) : (
+          <TouchableOpacity 
+            style={styles.sendButton} 
+            onPress={handleSend}
+            disabled={!message.trim()}
+          >
+            <Ionicons 
+              name="send" 
+              size={24} 
+              color={message.trim() ? colors.tint : colors.icon} 
+            />
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -149,6 +211,23 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  retryButton: {
+    marginTop: 15,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 5,
   },
   messagesContainer: {
     padding: 15,
@@ -199,5 +278,9 @@ const styles = StyleSheet.create({
   sendButton: {
     marginLeft: 10,
     padding: 10,
+    height: 44,
+    width: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

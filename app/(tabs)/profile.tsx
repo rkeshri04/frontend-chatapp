@@ -4,6 +4,8 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout, updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
+import { debugAuthToken, testAuthRequest } from '../../utils/authDebugger';
+import Constants from 'expo-constants';
 
 export default function ProfileScreen() {
   const user = useAppSelector(state => state.auth.user);
@@ -71,6 +73,14 @@ export default function ProfileScreen() {
     dispatch(updateActivity());
   };
 
+  // Add this function to debug authentication
+  const handleDebugAuth = async () => {
+    await debugAuthToken();
+    const apiUrl = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
+    await testAuthRequest(apiUrl);
+    dispatch(updateActivity());
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -125,6 +135,15 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Add this section for debugging */}
+      <View style={styles.section}>
+        <TouchableOpacity style={styles.menuItem} onPress={handleDebugAuth}>
+          <Ionicons name="bug-outline" size={24} color="#007AFF" />
+          <Text style={styles.menuText}>Debug Authentication</Text>
+          <Ionicons name="chevron-forward" size={20} color="#ccc" />
+        </TouchableOpacity>
+      </View>
+      
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
         <Text style={styles.logoutText}>Logout</Text>

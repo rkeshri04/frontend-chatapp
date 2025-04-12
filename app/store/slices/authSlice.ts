@@ -28,7 +28,7 @@ const initialState: AuthState = {
   lastActivityTime: null,
 };
 
-// Initialize auth state from secure storage
+// Initialize auth state from secure storage - fix token handling
 export const initializeAuth = createAsyncThunk(
   'auth/initialize',
   async (_, { dispatch }) => {
@@ -39,24 +39,22 @@ export const initializeAuth = createAsyncThunk(
       const lastActivityTimeStr = await SecureStore.getItemAsync('lastActivityTime');
       
       if (token && userJson) {
+        console.log('Found stored token and user data');
         const user = JSON.parse(userJson);
         const sessionExpiryTime = sessionExpiryTimeStr ? parseInt(sessionExpiryTimeStr) : null;
         const lastActivityTime = lastActivityTimeStr ? parseInt(lastActivityTimeStr) : null;
         
         const now = Date.now();
         
-        // Check if session has expired
+        // Check if session has expired, but don't log out automatically - just return auth data
+        // and let the component handle expiry
         if (sessionExpiryTime && now > sessionExpiryTime) {
-          console.log('Session expired, logging out');
-          dispatch(logout());
-          return null;
+          console.log('Session expiry time has passed, but returning data for component handling');
         }
         
-        // Check for inactivity timeout
+        // Check for inactivity timeout, but don't log out automatically
         if (lastActivityTime && now - lastActivityTime > INACTIVITY_TIMEOUT) {
-          console.log('User inactive, logging out');
-          dispatch(logout());
-          return null;
+          console.log('Inactivity threshold reached, but returning data for component handling');
         }
         
         // Update activity time
@@ -90,27 +88,41 @@ export const login = createAsyncThunk(
       });
       
       console.log('Login response status:', response.status);
-      console.log('Response data:', JSON.stringify(response.data, null, 2));
-      
-      // Handle the nested response structure from the backend
-      const responseData = response.data;
+      console.log('Response data structure:', Object.keys(response.data));
       
       // Extract token and user from the nested structure
-      const token = responseData.access_token.access_token;
-      const user = responseData.access_token.user;
+      let token, user;
       
-      console.log('Extracted token and user:', { token: '***', user });
+      // Handle different possible response structures
+      if (response.data.access_token) {
+        if (typeof response.data.access_token === 'string') {
+          token = response.data.access_token;
+          user = response.data.user;
+        } else if (response.data.access_token.access_token) {
+          token = response.data.access_token.access_token;
+          user = response.data.access_token.user;
+        }
+      } else if (response.data.token) {
+        token = response.data.token;
+        user = response.data.user;
+      }
       
       if (!token || !user) {
+        console.error('Could not extract token or user from response:', 
+                     JSON.stringify(response.data, null, 2).substring(0, 200) + '...');
         return rejectWithValue('Login failed: Invalid response format from server');
       }
+      
+      console.log('Extracted token type:', typeof token, 'length:', token.length);
+      console.log('User data available:', Object.keys(user));
       
       // Calculate session expiry time (59 minutes from now)
       const sessionExpiryTime = Date.now() + SESSION_EXPIRE_TIME;
       const lastActivityTime = Date.now();
       
-      // Store token in secure storage
+      // Store token in secure storage WITHOUT modifying it - preserve original format
       await SecureStore.setItemAsync('token', token);
+      console.log('Token stored in SecureStore');
       
       // Store user data in secure storage as JSON string
       await SecureStore.setItemAsync('user', JSON.stringify(user));
@@ -122,13 +134,8 @@ export const login = createAsyncThunk(
       await SecureStore.setItemAsync('lastActivityTime', lastActivityTime.toString());
       
       return { 
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          default_language: user.default_language
-        }, 
-        token: token,
+        user,
+        token,
         sessionExpiryTime,
         lastActivityTime
       };
@@ -152,7 +159,12 @@ export const login = createAsyncThunk(
         if (error.response) {
           // Server responded with a status code outside of 2xx range
           console.error('Server error response:', error.response.data);
-          return rejectWithValue(error.response.data.detail || 'Login failed: Server error');
+          // Return the exact error message from the server for better user feedback
+          return rejectWithValue(
+            error.response.data.detail || 
+            error.response.data.message || 
+            'Login failed: Invalid credentials'
+          );
         } else if (error.request) {
           // Request was made but no response received
           console.error('No response received from server');
@@ -276,6 +288,46 @@ export const checkSessionExpiry = createAsyncThunk(
   }
 );
 
+// Action to validate token with the backend
+export const validateToken = createAsyncThunk(
+  'auth/validateToken',
+  async (_, { getState, rejectWithValue }) => {
+    try {
+      const state = getState() as { auth: AuthState };
+      
+      if (!state.auth.token) {
+        return rejectWithValue('No token found');
+      }
+      
+      // Log the token being used (just the first few characters for security)
+      const tokenPreview = state.auth.token.substring(0, 10) + '...';
+      console.log('Validating token:', tokenPreview);
+      
+      // Make a request to a protected endpoint to validate token
+      const response = await axios.get(`${API_URL}/auth/validate`, {
+        headers: {
+          Authorization: `Bearer ${state.auth.token}`
+        }
+      });
+      
+      console.log('Token validation response:', response.status);
+      
+      // If successful, return true
+      return true;
+    } catch (error) {
+      console.error('Token validation error:', error);
+      
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        // If unauthorized, the token is invalid
+        console.log('Token is invalid or expired');
+        return rejectWithValue('Token expired');
+      }
+      
+      return rejectWithValue('Failed to validate token');
+    }
+  }
+);
+
 const authSlice = createSlice({
   name: 'auth',
   initialState,
@@ -346,6 +398,14 @@ const authSlice = createSlice({
         if (action.payload) {
           state.lastActivityTime = action.payload;
         }
+      })
+      // Handle token validation
+      .addCase(validateToken.rejected, (state) => {
+        // If token validation fails, clear credentials
+        state.user = null;
+        state.token = null;
+        state.sessionExpiryTime = null;
+        state.lastActivityTime = null;
       });
   },
 });

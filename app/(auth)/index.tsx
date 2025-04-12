@@ -1,31 +1,52 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View, Alert, useColorScheme } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View, Alert, useColorScheme, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAppDispatch } from '../store/hooks';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { login } from '../store/slices/authSlice';
 import { Colors } from '../../constants/Colors';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const isLoading = useAppSelector(state => state.auth.isLoading);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+    // Reset previous error
+    setErrorMessage(null);
+    
+    // Form validation
+    if (!email) {
+      setErrorMessage('Email is required');
+      return;
+    }
+    
+    if (!password) {
+      setErrorMessage('Password is required');
+      return;
+    }
+    
+    // Simple email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setErrorMessage('Please enter a valid email address');
       return;
     }
 
     try {
+      // Attempt login
       const result = await dispatch(login({ email, password })).unwrap();
       if (result) {
         router.replace('../(tabs)');
       }
     } catch (error) {
-      Alert.alert('Login Failed', error as string);
+      // Show the error from the server
+      setErrorMessage(error as string);
+      console.log('Login error caught:', error);
     }
   };
 
@@ -34,34 +55,75 @@ export default function Login() {
       <Text style={[styles.title, { color: colors.text }]}>Chat App</Text>
       <Text style={[styles.subtitle, { color: colors.icon }]}>Sign in to your account</Text>
       
+      {errorMessage && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
+      )}
+      
       <View style={styles.inputContainer}>
         <TextInput
-          style={[styles.input, { borderColor: colorScheme === 'dark' ? '#333' : '#ddd', color: colors.text }]}
+          style={[
+            styles.input, 
+            { 
+              borderColor: colorScheme === 'dark' ? '#333' : '#ddd', 
+              color: colors.text 
+            },
+            errorMessage && !email ? { borderColor: '#FF3B30' } : null
+          ]}
           placeholder="Email"
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(text) => {
+            setEmail(text);
+            if (errorMessage) setErrorMessage(null);
+          }}
           autoCapitalize="none"
           keyboardType="email-address"
           placeholderTextColor={colors.icon}
+          editable={!isLoading}
+          autoCorrect={false}
         />
         
         <TextInput
-          style={[styles.input, { borderColor: colorScheme === 'dark' ? '#333' : '#ddd', color: colors.text }]}
+          style={[
+            styles.input, 
+            { 
+              borderColor: colorScheme === 'dark' ? '#333' : '#ddd', 
+              color: colors.text 
+            },
+            errorMessage && !password ? { borderColor: '#FF3B30' } : null
+          ]}
           placeholder="Password"
           value={password}
-          onChangeText={setPassword}
+          onChangeText={(text) => {
+            setPassword(text);
+            if (errorMessage) setErrorMessage(null);
+          }}
           secureTextEntry
           placeholderTextColor={colors.icon}
+          editable={!isLoading}
         />
       </View>
       
-      <TouchableOpacity style={[styles.button, { backgroundColor: colors.tint }]} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Sign In</Text>
+      <TouchableOpacity 
+        style={[
+          styles.button, 
+          { backgroundColor: colors.tint },
+          isLoading ? { opacity: 0.7 } : null
+        ]} 
+        onPress={handleLogin}
+        disabled={isLoading}
+      >
+        {isLoading ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Text style={styles.buttonText}>Sign In</Text>
+        )}
       </TouchableOpacity>
       
       <View style={styles.footer}>
         <Text style={{ color: colors.text }}>Don't have an account? </Text>
-        <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
+        <TouchableOpacity onPress={() => router.push('/(auth)/register')} disabled={isLoading}>
           <Text style={[styles.linkText, { color: colors.tint }]}>Sign Up</Text>
         </TouchableOpacity>
       </View>
@@ -114,5 +176,16 @@ const styles = StyleSheet.create({
   },
   linkText: {
     fontWeight: 'bold',
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 15,
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
