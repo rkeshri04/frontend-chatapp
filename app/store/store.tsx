@@ -21,5 +21,4 @@ export type AppDispatch = typeof store.dispatch;
 
 // Add a default export to fix the route issue
 export default function StoreComponent() {
-  return <Text>This component is not meant to be rendered directly</Text>;
 }

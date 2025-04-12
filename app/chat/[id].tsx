@@ -7,6 +7,13 @@ import { updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
+interface Message {
+  id: string;
+  text: string;
+  sender: string;
+  timestamp: string | number | Date;
+}
+
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
   const [message, setMessage] = useState('');
@@ -105,8 +112,8 @@ export default function ChatScreen() {
       </View>
     );
   }
-  
-  const renderMessage = ({ item }) => {
+
+  const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender === 'me';
     return (
       <View style={[
@@ -142,7 +149,6 @@ export default function ChatScreen() {
           headerBackTitle: 'Back',
           headerStyle: {
             backgroundColor: colors.background,
-            height: 80, // Make header shorter
           },
           headerTitleStyle: {
             fontSize: 18,

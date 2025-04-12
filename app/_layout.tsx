@@ -46,9 +46,9 @@ function AppWrapper() {
   }, [token, authInitialized, initializing]);
   
   // Log navigation changes
-  useEffect(() => {
-    logNavigation(segments.join('/'), 'Navigate');
-  }, [segments]);
+  // useEffect(() => {
+  //   logNavigation(segments.join('/'), 'Navigate');
+  // }, [segments]);
 
   // Initialize auth state and theme on app startup
   useEffect(() => {
@@ -113,14 +113,14 @@ function AppWrapper() {
         if (!inAuthGroup && !hasRedirected.current) {
           logAuth(`No token, redirecting from ${currentRoute} to login`);
           hasRedirected.current = true;
-          router.replace('/(auth)');
+          router.replace('../(auth)');
         }
       } else {
         // Has token, redirect to main app unless already there
         if (inAuthGroup && !hasRedirected.current) {
           logAuth(`Has token, redirecting from ${currentRoute} to main app`);
           hasRedirected.current = true;
-          router.replace('/(tabs)');
+          router.replace('../(tabs)');
         }
       }
     } else {
