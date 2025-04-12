@@ -1,30 +1,26 @@
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
+import { useAppSelector } from '../store/hooks';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useColorScheme } from 'react-native';
-import { Colors } from '../../constants/Colors';
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+export default function TabsLayout() {
+  const token = useAppSelector(state => state.auth.token);
+  const router = useRouter();
+  
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!token) {
+      router.replace('/(auth)');
+    }
+  }, [token, router]);
+  
+  if (!token) {
+    return null; // Don't render anything while redirecting
+  }
   
   return (
-    <Tabs 
-      screenOptions={{ 
-        tabBarActiveTintColor: colors.tint,
-        tabBarInactiveTintColor: colors.tabIconDefault,
-        tabBarStyle: { 
-          backgroundColor: colors.background,
-          borderTopColor: colorScheme === 'dark' ? '#333' : '#eee',
-        },
-        headerStyle: {
-          backgroundColor: colors.background,
-        },
-        headerTintColor: colors.text,
-        tabBarLabelStyle: {
-          fontWeight: '500',
-        },
-      }}
-    >
+    <Tabs>
       <Tabs.Screen
         name="index"
         options={{

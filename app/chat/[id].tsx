@@ -3,6 +3,7 @@ import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, 
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { sendMessage, setCurrentChat, clearCurrentChat } from '../store/slices/chatSlice';
+import { updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 
@@ -21,6 +22,8 @@ export default function ChatScreen() {
   useEffect(() => {
     if (id) {
       dispatch(setCurrentChat(id as string));
+      // Update activity timestamp when entering chat
+      dispatch(updateActivity());
     }
     
     return () => {
@@ -32,11 +35,19 @@ export default function ChatScreen() {
     if (!message.trim() || !id) return;
     
     try {
+      // Update activity on message send
+      dispatch(updateActivity());
       await dispatch(sendMessage({ chatId: id as string, text: message.trim() })).unwrap();
       setMessage('');
     } catch (error) {
       console.error('Failed to send message:', error);
     }
+  };
+  
+  // Update activity when user starts typing
+  const handleTyping = (text: string) => {
+    dispatch(updateActivity());
+    setMessage(text);
   };
   
   if (!chat) {
@@ -94,6 +105,7 @@ export default function ChatScreen() {
         renderItem={renderMessage}
         contentContainerStyle={styles.messagesContainer}
         inverted={false}
+        onScroll={() => dispatch(updateActivity())}
       />
       
       <View style={[
@@ -114,7 +126,7 @@ export default function ChatScreen() {
           ]}
           placeholder="Type a message..."
           value={message}
-          onChangeText={setMessage}
+          onChangeText={handleTyping}
           multiline
           placeholderTextColor={colors.icon}
         />
