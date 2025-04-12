@@ -3,7 +3,6 @@ import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, 
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, verifySecondaryCode, fetchUnlockedMessage } from '../store/slices/chatSlice';
-import { updateActivity } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -57,7 +56,6 @@ export default function ChatScreen() {
 
     if (chatId) {
       dispatch(setCurrentChat(chatId));
-      dispatch(updateActivity());
     }
 
     return () => {
@@ -78,7 +76,6 @@ export default function ChatScreen() {
 
     try {
       setIsSending(true);
-      dispatch(updateActivity());
       await dispatch(sendMessage({ chatId: chatId, text: message.trim() })).unwrap();
       setMessage('');
     } catch (error) {
@@ -89,7 +86,6 @@ export default function ChatScreen() {
   };
 
   const handleTyping = (text: string) => {
-    dispatch(updateActivity());
     setMessage(text);
   };
 
@@ -124,7 +120,6 @@ export default function ChatScreen() {
 
     setIsSecondaryVerifying(true);
     setSecondaryVerificationError(null);
-    dispatch(updateActivity());
 
     try {
       const verifyResultAction = await dispatch(verifySecondaryCode({
@@ -288,7 +283,6 @@ export default function ChatScreen() {
         renderItem={renderMessage}
         contentContainerStyle={styles.messagesContainer}
         inverted={false}
-        onScroll={() => dispatch(updateActivity())}
       />
 
       <View style={[

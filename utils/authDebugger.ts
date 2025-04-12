@@ -49,18 +49,6 @@ export const debugAuthToken = async () => {
       console.log('No session expiry info found');
     }
     
-    // Check activity time
-    const activityTime = await SecureStore.getItemAsync('lastActivityTime');
-    if (activityTime) {
-      const lastActivity = parseInt(activityTime);
-      const now = Date.now();
-      const idleTime = now - lastActivity;
-      console.log('Last activity:', new Date(lastActivity).toLocaleString());
-      console.log('Idle time:', Math.floor(idleTime / 60000), 'minutes', Math.floor((idleTime % 60000) / 1000), 'seconds');
-    } else {
-      console.log('No activity time info found');
-    }
-    
     // Check Redux store state
     const state = store.getState();
     console.log('Redux auth state:', {
@@ -69,6 +57,7 @@ export const debugAuthToken = async () => {
       initialized: state.auth.initialized,
       isLoading: state.auth.isLoading,
       showExpiryWarning: state.auth.showExpiryWarning,
+      sessionExpiryTime: state.auth.sessionExpiryTime ? new Date(state.auth.sessionExpiryTime).toLocaleTimeString() : null,
     });
     
     console.log('===================================');
@@ -146,9 +135,6 @@ export const setQuickExpirySession = async (secondsUntilExpiry: number = 35) => 
     const expiryTime = Date.now() + (secondsUntilExpiry * 1000);
     await SecureStore.setItemAsync('sessionExpiryTime', expiryTime.toString());
     
-    // Update activity time
-    await SecureStore.setItemAsync('lastActivityTime', Date.now().toString());
-    
     console.log('Quick expiry session set - expiry at:', new Date(expiryTime).toLocaleTimeString());
     console.log('Warning should appear in:', secondsUntilExpiry - 30, 'seconds');
     
@@ -173,7 +159,6 @@ export const clearAllAuthData = async () => {
     await SecureStore.deleteItemAsync('token');
     await SecureStore.deleteItemAsync('user');
     await SecureStore.deleteItemAsync('sessionExpiryTime');
-    await SecureStore.deleteItemAsync('lastActivityTime');
     
     // Force Redux to refresh
     store.dispatch({ type: 'auth/forceRefresh' });

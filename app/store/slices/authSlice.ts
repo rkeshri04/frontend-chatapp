@@ -9,7 +9,6 @@ const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
 // Session constants
 const SESSION_EXPIRE_TIME = 59 * 60 * 1000; // 59 minutes in milliseconds
-const INACTIVITY_TIMEOUT = 2 * 60 * 1000; // 2 minutes in milliseconds
 const EXPIRY_WARNING_TIME = 30 * 1000; // 30 seconds before expiry
 
 interface AuthState {
@@ -18,7 +17,6 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   sessionExpiryTime: number | null;
-  lastActivityTime: number | null;
   showExpiryWarning: boolean; 
   initialized: boolean; // Track whether auth has been initialized
 }
@@ -29,7 +27,6 @@ const initialState: AuthState = {
   isLoading: false,
   error: null,
   sessionExpiryTime: null,
-  lastActivityTime: null,
   showExpiryWarning: false,
   initialized: false,
 };
@@ -43,14 +40,12 @@ export const initializeAuth = createAsyncThunk(
       const token = await SecureStore.getItemAsync('token');
       const userJson = await SecureStore.getItemAsync('user');
       const sessionExpiryTimeStr = await SecureStore.getItemAsync('sessionExpiryTime');
-      const lastActivityTimeStr = await SecureStore.getItemAsync('lastActivityTime');
       
       if (token && userJson) {
         logAuth('Found stored token and user data', { tokenLength: token.length });
         try {
           const user = JSON.parse(userJson);
           const sessionExpiryTime = sessionExpiryTimeStr ? parseInt(sessionExpiryTimeStr) : null;
-          const lastActivityTime = lastActivityTimeStr ? parseInt(lastActivityTimeStr) : null;
           
           const now = Date.now();
           
@@ -62,17 +57,6 @@ export const initializeAuth = createAsyncThunk(
             });
           }
           
-          // Check for inactivity timeout
-          if (lastActivityTime && now - lastActivityTime > INACTIVITY_TIMEOUT) {
-            logAuth('Inactivity threshold reached, but returning data for component handling', {
-              inactive: true,
-              lastActivity: new Date(lastActivityTime).toISOString()
-            });
-          }
-          
-          // Update activity time
-          dispatch(updateActivity());
-          
           // Start the session expiry check
           dispatch(startSessionExpiryCheck());
           
@@ -80,7 +64,6 @@ export const initializeAuth = createAsyncThunk(
             user, 
             token,
             sessionExpiryTime,
-            lastActivityTime
           };
         } catch (error) {
           logAuthError('Error parsing stored user data', error);
@@ -139,7 +122,6 @@ export const login = createAsyncThunk(
       
       // Calculate session expiry time (59 minutes from now)
       const sessionExpiryTime = Date.now() + SESSION_EXPIRE_TIME;
-      const lastActivityTime = Date.now();
       
       // Store token in secure storage WITHOUT modifying it - preserve original format
       await SecureStore.setItemAsync('token', token);
@@ -151,14 +133,10 @@ export const login = createAsyncThunk(
       // Store session expiry time
       await SecureStore.setItemAsync('sessionExpiryTime', sessionExpiryTime.toString());
       
-      // Store last activity time
-      await SecureStore.setItemAsync('lastActivityTime', lastActivityTime.toString());
-      
       return { 
         user,
         token,
         sessionExpiryTime,
-        lastActivityTime
       };
     } catch (error: any) {
       console.error('Login error:', error);
@@ -211,7 +189,6 @@ export const logout = createAsyncThunk(
       await SecureStore.deleteItemAsync('token');
       await SecureStore.deleteItemAsync('user');
       await SecureStore.deleteItemAsync('sessionExpiryTime');
-      await SecureStore.deleteItemAsync('lastActivityTime');
       
       // On iOS, make sure SecureStore is completely updated
       if (Platform.OS === 'ios') {
@@ -248,7 +225,6 @@ export const register = createAsyncThunk(
         
         // Calculate session expiry time (59 minutes from now)
         const sessionExpiryTime = Date.now() + SESSION_EXPIRE_TIME;
-        const lastActivityTime = Date.now();
         
         // Store token in secure storage
         await SecureStore.setItemAsync('token', token);
@@ -259,39 +235,15 @@ export const register = createAsyncThunk(
         // Store session expiry time
         await SecureStore.setItemAsync('sessionExpiryTime', sessionExpiryTime.toString());
         
-        // Store last activity time
-        await SecureStore.setItemAsync('lastActivityTime', lastActivityTime.toString());
-        
         return { 
           user, 
           token,
           sessionExpiryTime,
-          lastActivityTime
         };
       }
       return rejectWithValue('Invalid registration data');
     } catch (error) {
       return rejectWithValue('Registration failed');
-    }
-  }
-);
-
-// Action to update the last activity time
-export const updateActivity = createAsyncThunk(
-  'auth/updateActivity',
-  async (_, { getState }) => {
-    try {
-      const state = getState() as { auth: AuthState };
-      
-      if (state.auth.token) {
-        const lastActivityTime = Date.now();
-        await SecureStore.setItemAsync('lastActivityTime', lastActivityTime.toString());
-        return lastActivityTime;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error updating activity time:', error);
-      return null;
     }
   }
 );
@@ -315,13 +267,6 @@ export const checkSessionExpiry = createAsyncThunk(
         // Check if session has expired
         if (now >= state.auth.sessionExpiryTime) {
           console.log('Session expired, logging out');
-          dispatch(logout());
-          return { showWarning: false, expired: true };
-        }
-        
-        // Check for inactivity
-        if (state.auth.lastActivityTime && now - state.auth.lastActivityTime > INACTIVITY_TIMEOUT) {
-          console.log('User inactive, logging out');
           dispatch(logout());
           return { showWarning: false, expired: true };
         }
@@ -398,7 +343,6 @@ const authSlice = createSlice({
       state.user = null;
       state.token = null;
       state.sessionExpiryTime = null;
-      state.lastActivityTime = null;
     },
     // Clear the expiry warning
     clearExpiryWarning: (state) => {
@@ -430,14 +374,12 @@ const authSlice = createSlice({
           state.user = action.payload.user;
           state.token = action.payload.token;
           state.sessionExpiryTime = action.payload.sessionExpiryTime;
-          state.lastActivityTime = action.payload.lastActivityTime;
         } else {
           logAuth('Auth initialization succeeded but no user data found');
           // Clear any existing data to ensure a clean state
           state.user = null;
           state.token = null;
           state.sessionExpiryTime = null;
-          state.lastActivityTime = null;
         }
       })
       .addCase(initializeAuth.rejected, (state, action) => {
@@ -460,7 +402,6 @@ const authSlice = createSlice({
         state.user = action.payload.user;
         state.token = action.payload.token;
         state.sessionExpiryTime = action.payload.sessionExpiryTime;
-        state.lastActivityTime = action.payload.lastActivityTime;
       })
       .addCase(login.rejected, (state, action) => {
         logAuthError('Login failed', action.payload);
@@ -478,7 +419,6 @@ const authSlice = createSlice({
         state.user = null;
         state.token = null;
         state.sessionExpiryTime = null;
-        state.lastActivityTime = null;
         // Keep initialized as true since we know the auth state
       })
       .addCase(logout.rejected, (state, action) => {
@@ -497,18 +437,10 @@ const authSlice = createSlice({
         state.user = action.payload.user;
         state.token = action.payload.token;
         state.sessionExpiryTime = action.payload.sessionExpiryTime;
-        state.lastActivityTime = action.payload.lastActivityTime;
       })
       .addCase(register.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
-      })
-      
-      // Update activity
-      .addCase(updateActivity.fulfilled, (state, action) => {
-        if (action.payload) {
-          state.lastActivityTime = action.payload;
-        }
       })
       
       // Handle session expiry check
@@ -524,7 +456,6 @@ const authSlice = createSlice({
         state.user = null;
         state.token = null;
         state.sessionExpiryTime = null;
-        state.lastActivityTime = null;
       });
   },
 });

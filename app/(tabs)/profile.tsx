@@ -1,7 +1,7 @@
 import { StyleSheet, Text, TouchableOpacity, View, ScrollView, Alert, useColorScheme, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { logout, updateActivity } from '../store/slices/authSlice';
+import { logout } from '../store/slices/authSlice';
 import { setThemeMode, saveTheme } from '../store/slices/themeSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
@@ -25,11 +25,6 @@ export default function ProfileScreen() {
   // Dark mode switch state
   const [isDarkMode, setIsDarkMode] = useState(themeMode === 'dark');
   const [useSystemTheme, setUseSystemTheme] = useState(themeMode === 'system');
-
-  // Update activity on screen focus
-  useEffect(() => {
-    dispatch(updateActivity());
-  }, [dispatch]);
   
   // Sync switch states with Redux theme state
   useEffect(() => {
@@ -108,17 +103,13 @@ export default function ProfileScreen() {
     }
   };
 
-  // Update activity on user interaction
-  const handleMenuPress = () => {
-    dispatch(updateActivity());
-  };
+  const handleMenuPress = () => {};
 
   // Add this function to debug authentication
   const handleDebugAuth = async () => {
     await debugAuthToken();
     const apiUrl = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
     await testAuthRequest(apiUrl);
-    dispatch(updateActivity());
   };
 
   // Add test function for session expiry

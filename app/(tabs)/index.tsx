@@ -4,7 +4,7 @@ import { ThemedText } from '@/app-example/components/ThemedText';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchConversations, setCurrentChat, verifyConversationCode, fetchChatMessages } from '../store/slices/chatSlice';
-import { updateActivity, logout } from '../store/slices/authSlice';
+import { logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -40,11 +40,8 @@ export default function TabOneScreen() {
     if (token) {
       console.log('User has token, fetching conversations');
       loadConversations();
-      // Update user activity time
-      dispatch(updateActivity());
     } else {
       console.log('No token found, checking initialization status');
-      // Don't automatically redirect - wait for initialization to complete
     }
   }, [dispatch, token]);
 
@@ -81,7 +78,6 @@ export default function TabOneScreen() {
     setIsVerifying(false); // Reset loading state
     setShowCode(false); // Hide code initially
     setModalVisible(true);
-    dispatch(updateActivity()); // Update activity when interaction starts
   };
 
   const handleVerifyCode = async () => {
@@ -92,7 +88,6 @@ export default function TabOneScreen() {
 
     setIsVerifying(true);
     setVerificationError(null);
-    dispatch(updateActivity()); // Update activity on verification attempt
 
     try {
       // Dispatch the verification thunk

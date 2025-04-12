@@ -3,9 +3,9 @@ import { Slot, useRouter, useSegments } from 'expo-router';
 import { Provider } from 'react-redux';
 import { store } from './store/store';
 import { useAppDispatch, useAppSelector } from './store/hooks';
-import { initializeAuth, checkSessionExpiry, updateActivity, logout } from './store/slices/authSlice';
+import { initializeAuth, checkSessionExpiry, logout } from './store/slices/authSlice';
 import { initializeTheme } from './store/slices/themeSlice';
-import { TouchableWithoutFeedback, AppState, AppStateStatus, Text, View, ActivityIndicator } from 'react-native';
+import { AppState, AppStateStatus, Text, View, ActivityIndicator } from 'react-native';
 import SessionExpiryNotification from '../components/SessionExpiryNotification';
 import { useAppTheme } from './hooks/useAppTheme';
 import { logAuth, logAuthError, logNavigation, dumpAuthState } from '../utils/authLogger';
@@ -132,9 +132,7 @@ function AppWrapper() {
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active' && token) {
-        logAuth('App returned to foreground, updating activity');
-        // User returned to the app - update activity time
-        dispatch(updateActivity());
+        logAuth('App returned to foreground, checking session');
         // Also check if session has expired
         dispatch(checkSessionExpiry());
       }
@@ -147,13 +145,6 @@ function AppWrapper() {
     };
   }, [token, dispatch]);
 
-  // Track user interactions to update activity time
-  const handleUserInteraction = () => {
-    if (token) {
-      dispatch(updateActivity());
-    }
-  };
-
   // If still initializing, show a loading screen
   if (initializing) {
     return (
@@ -165,12 +156,10 @@ function AppWrapper() {
   }
 
   return (
-    <TouchableWithoutFeedback onPress={handleUserInteraction}>
-      <View style={{ flex: 1 }}>
-        <SessionExpiryNotification />
-        <Slot />
-      </View>
-    </TouchableWithoutFeedback>
+    <View style={{ flex: 1 }}>
+      <SessionExpiryNotification />
+      <Slot />
+    </View>
   );
 }
 
