@@ -4,10 +4,12 @@ import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { login } from '../store/slices/authSlice';
 import { useAppTheme } from '../hooks/useAppTheme';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
   const dispatch = useAppDispatch();
   const isLoading = useAppSelector(state => state.auth.isLoading);
@@ -51,6 +53,10 @@ export default function LoginScreen() {
     }
   };
 
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.title, { color: colors.text }]}>Chat App</Text>
@@ -75,21 +81,34 @@ export default function LoginScreen() {
           autoCorrect={false}
         />
 
-        <TextInput
-          style={[
-            styles.input,
-            {
-              borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
-              color: colors.text,
-            },
-          ]}
-          placeholder="Password"
-          value={password}
-          onChangeText={(text) => setPassword(text)}
-          secureTextEntry
-          placeholderTextColor={colors.icon}
-          editable={!isLoading}
-        />
+        <View style={styles.passwordContainer}>
+          <TextInput
+            style={[
+              styles.passwordInput,
+              {
+                borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
+                color: colors.text,
+              },
+            ]}
+            placeholder="Password"
+            value={password}
+            onChangeText={(text) => setPassword(text)}
+            secureTextEntry={!showPassword}
+            placeholderTextColor={colors.icon}
+            editable={!isLoading}
+          />
+          <TouchableOpacity 
+            style={styles.eyeButton} 
+            onPress={togglePasswordVisibility}
+            disabled={isLoading}
+          >
+            <Ionicons 
+              name={showPassword ? 'eye-off' : 'eye'} 
+              size={24} 
+              color={colors.icon} 
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <TouchableOpacity
@@ -144,6 +163,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 15,
     paddingHorizontal: 15,
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    position: 'relative',
+    marginBottom: 15,
+  },
+  passwordInput: {
+    flex: 1,
+    height: 50,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    paddingRight: 50, // Make room for the eye button
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    height: 50,
+    justifyContent: 'center',
   },
   button: {
     height: 50,

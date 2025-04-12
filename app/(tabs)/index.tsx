@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, useColorScheme, Alert } from 'react-native';
+import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { ThemedText } from '@/app-example/components/ThemedText';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchConversations, setCurrentChat } from '../store/slices/chatSlice';
 import { updateActivity, logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../../constants/Colors';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 // Define the interface for chat items
 interface ChatItem {
@@ -23,8 +23,7 @@ export default function TabOneScreen() {
   const token = useAppSelector(state => state.auth.token);
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
+  const { colors, colorScheme } = useAppTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [authError, setAuthError] = useState(false);
 
