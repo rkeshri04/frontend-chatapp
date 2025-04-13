@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react'; // Removed useLayoutEffect
 import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Modal, TextInput, Pressable } from 'react-native';
 import { ThemedText } from '@/app-example/components/ThemedText';
 import { useRouter } from 'expo-router';
@@ -7,6 +7,7 @@ import { fetchConversations, setCurrentChat, verifyConversationCode, fetchChatMe
 import { logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
+import SearchUserOverlay from '../../components/SearchUserOverlay'; // Import the overlay component
 
 // Define the interface for chat items
 interface ChatItem {
@@ -34,6 +35,9 @@ export default function TabOneScreen() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
+
+  // State for overlay visibility
+  const [searchOverlayVisible, setSearchOverlayVisible] = useState(false);
 
   // Fetch conversations when component mounts
   useEffect(() => {
@@ -136,6 +140,15 @@ export default function TabOneScreen() {
   const closeModal = () => {
     setModalVisible(false);
     setSelectedChatId(null);
+  };
+
+  const openConversationCodeModal = (chatId: string) => {
+    setSelectedChatId(chatId);
+    setEnteredCode(''); // Clear previous code
+    setVerificationError(null); // Clear previous error
+    setIsVerifying(false); // Reset loading state
+    setShowCode(false); // Hide code initially
+    setModalVisible(true); // Show the modal
   };
 
   const renderChatItem = ({ item }: { item: ChatItem }) => {
@@ -267,9 +280,9 @@ export default function TabOneScreen() {
         
         <TouchableOpacity 
           style={[styles.fabButton, { backgroundColor: colors.tint }]}
-          onPress={() => router.push('../new-chat')}
+          onPress={() => setSearchOverlayVisible(true)} // Open search overlay
         >
-          <Ionicons name="create-outline" size={24} color="#fff" />
+          <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
 
         {/* Verification Modal */}
@@ -332,6 +345,12 @@ export default function TabOneScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* Search User Overlay */}
+        <SearchUserOverlay
+          visible={searchOverlayVisible}
+          onClose={() => setSearchOverlayVisible(false)}
+        />
       </View>
     </>
   );
@@ -514,6 +533,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 10, // Add zIndex to ensure it's on top
   },
   modalView: {
     margin: 20,
@@ -527,8 +547,9 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.25,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: 5, // Ensure elevation for Android
     width: '85%',
+    // Ensure background color is applied (already using colors.card)
   },
   modalTitle: {
     marginBottom: 8,
