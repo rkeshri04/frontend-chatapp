@@ -1,8 +1,3 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
 export const Colors = {
   light: {
     text: '#000',
@@ -13,6 +8,7 @@ export const Colors = {
     icon: '#999',
     border: '#ddd',
     notification: '#FF3B30',
+    card: '#f9f9f9',
   },
   dark: {
     text: '#fff',
@@ -23,5 +19,6 @@ export const Colors = {
     icon: '#808080',
     border: '#333',
     notification: '#FF453A',
+    card: '#1f1f1f',
   },
 };

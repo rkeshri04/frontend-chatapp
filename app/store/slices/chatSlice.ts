@@ -426,6 +426,16 @@ const chatSlice = createSlice({
         }
       }
     },
+    manuallyLockMessage: (state, action: PayloadAction<{ chatId: string; messageId: string }>) => {
+      const { chatId, messageId } = action.payload;
+      const chat = state.chats.find(c => c.id === chatId);
+      if (chat) {
+        const message = chat.messages.find(m => m.id === messageId);
+        if (message && message.secondary_auth) {
+          message.is_verified = false;
+        }
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -494,21 +504,18 @@ const chatSlice = createSlice({
         state.currentChatCode = null;
       })
       .addCase(verifySecondaryCode.fulfilled, (state, action) => {
-        // Verification successful, just mark the message as verified.
-        // Content fetching is handled by fetchUnlockedMessage.
         const { chatId, messageId } = action.payload;
         const chat = state.chats.find(c => c.id === chatId);
         if (chat) {
           const message = chat.messages.find(m => m.id === messageId);
           if (message) {
-            message.is_verified = true; // Mark as verified
-            message.verification_attempts = 0; // Reset attempts
+            message.is_verified = true;
+            message.verification_attempts = 0;
             console.log(`Secondary code for message ${messageId} verified. Ready to fetch content.`);
           }
         }
       })
       .addCase(verifySecondaryCode.rejected, (state, action) => {
-        // Verification failed, increment attempts.
         const { chatId, messageId } = action.meta.arg;
         const chat = state.chats.find(c => c.id === chatId);
         if (chat) {
@@ -519,37 +526,27 @@ const chatSlice = createSlice({
           }
         }
       })
-      // Handle fetching the unlocked message content
       .addCase(fetchUnlockedMessage.pending, (state, action) => {
-        // Optional: Add specific loading state for the message being unlocked
         console.log(`Unlocking message ${action.meta.arg.messageId}...`);
       })
       .addCase(fetchUnlockedMessage.fulfilled, (state, action) => {
-        // Update the message text with the decrypted content
         const { chatId, messageId, decryptedContent } = action.payload;
         const chat = state.chats.find(c => c.id === chatId);
         if (chat) {
           const message = chat.messages.find(m => m.id === messageId);
           if (message) {
-            message.text = decryptedContent; // Update text
+            message.text = decryptedContent;
             console.log(`Message ${messageId} unlocked and content updated.`);
           }
         }
       })
       .addCase(fetchUnlockedMessage.rejected, (state, action) => {
-        // Handle failure to fetch content (e.g., log error, maybe revert is_verified?)
         const { messageId } = action.meta.arg;
         console.error(`Failed to fetch unlocked content for message ${messageId}. Error: ${action.payload}`);
-        // Optionally: Revert is_verified status or show an error indicator on the message
-        // const chat = state.chats.find(c => c.id === action.meta.arg.chatId);
-        // if (chat) {
-        //   const message = chat.messages.find(m => m.id === messageId);
-        //   if (message) message.is_verified = false; // Example: Revert verification status
-        // }
       });
   },
 });
 
-export const { setCurrentChat, clearCurrentChat, receiveMessage } = chatSlice.actions;
+export const { setCurrentChat, clearCurrentChat, receiveMessage, manuallyLockMessage } = chatSlice.actions;
 
 export default chatSlice.reducer;

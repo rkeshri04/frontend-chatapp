@@ -1,27 +1,23 @@
-import { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { useAppSelector } from '../store/hooks';
-import { useRouter } from 'expo-router';
+import { useAppTheme } from '../hooks/useAppTheme';
 
 export default function ChatLayout() {
-  const token = useAppSelector(state => state.auth.token);
-  const router = useRouter();
-  
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!token) {
-      router.replace('/(auth)');
-    }
-  }, [token, router]);
-  
+  const { colors } = useAppTheme();
+
   return (
-    <Stack>
-      <Stack.Screen 
-        name="[id]" 
-        options={{
-          headerShown: false, // Header is managed within the screen component
-        }} 
-      />
-    </Stack>
+    <Stack
+      screenOptions={{
+        // Explicitly ensure this stack shows headers
+        headerShown: true,
+        headerStyle: {
+          backgroundColor: colors.background,
+        },
+        headerTintColor: colors.tint, // Sets the default back arrow color
+        headerTitleStyle: {
+          color: colors.text,
+        },
+        headerShadowVisible: false,
+      }}
+    />
   );
 }

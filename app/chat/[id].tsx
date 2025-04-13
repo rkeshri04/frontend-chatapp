@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Modal, Pressable, Alert } from 'react-native';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Modal, Pressable, Alert, SafeAreaView } from 'react-native';
+import { useLocalSearchParams, useRouter, Stack, useNavigation } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, verifySecondaryCode, fetchUnlockedMessage } from '../store/slices/chatSlice';
+import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, verifySecondaryCode, fetchUnlockedMessage, manuallyLockMessage } from '../store/slices/chatSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -16,6 +16,12 @@ interface Message {
   verification_attempts?: number;
 }
 
+type UnlockedTimestamps = {
+  [messageId: string]: number;
+};
+
+const AUTO_RELOCK_DURATION = 60 * 1000;
+
 export default function ChatScreen() {
   const { id, primaryCode: primaryCodeFromParams } = useLocalSearchParams<{ id: string, primaryCode?: string }>();
   const chatId = id as string;
@@ -25,6 +31,7 @@ export default function ChatScreen() {
   const [isSending, setIsSending] = useState(false);
   const dispatch = useAppDispatch();
   const router = useRouter();
+  const navigation = useNavigation();
   const { colors, colorScheme } = useAppTheme();
   const flatListRef = useRef<FlatList>(null);
 
@@ -46,6 +53,8 @@ export default function ChatScreen() {
   const [isSecondaryVerifying, setIsSecondaryVerifying] = useState(false);
   const [secondaryVerificationError, setSecondaryVerificationError] = useState<string | null>(null);
   const [showSecondaryCode, setShowSecondaryCode] = useState(false);
+  const [unlockedTimestamps, setUnlockedTimestamps] = useState<UnlockedTimestamps>({});
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentAttempts = getMessageById(selectedMessageId)?.verification_attempts || 0;
 
@@ -70,6 +79,39 @@ export default function ChatScreen() {
       }, 200);
     }
   }, [chat?.messages]);
+
+  useEffect(() => {
+    if (chat?.name) {
+      navigation.setOptions({ headerTitle: chat.name });
+    }
+  }, [chat?.name, navigation]);
+
+  useEffect(() => {
+    const checkRelock = () => {
+      const now = Date.now();
+      let changed = false;
+      const newTimestamps = { ...unlockedTimestamps };
+
+      Object.keys(newTimestamps).forEach(msgId => {
+        if (now - newTimestamps[msgId] > AUTO_RELOCK_DURATION) {
+          delete newTimestamps[msgId];
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        setUnlockedTimestamps(newTimestamps);
+      }
+    };
+
+    intervalRef.current = setInterval(checkRelock, 10000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [unlockedTimestamps, chatId, dispatch]);
 
   const handleSend = async () => {
     if (!message.trim() || !chatId) return;
@@ -131,14 +173,22 @@ export default function ChatScreen() {
 
       if (verifySecondaryCode.fulfilled.match(verifyResultAction)) {
         console.log(`Secondary code verified for message ${selectedMessageId}. Now fetching content.`);
+        const currentMessageId = selectedMessageId!;
         closeSecondaryModal();
 
-        dispatch(fetchUnlockedMessage({
+        const fetchAction = await dispatch(fetchUnlockedMessage({
           chatId: chatId,
-          messageId: selectedMessageId,
-          primaryCode: primaryCode,
+          messageId: currentMessageId,
+          primaryCode: primaryCode!,
           secondaryCode: currentSecondaryCode
         }));
+
+        if (fetchUnlockedMessage.fulfilled.match(fetchAction)) {
+          setUnlockedTimestamps(prev => ({
+            ...prev,
+            [currentMessageId]: Date.now()
+          }));
+        }
       } else {
         const updatedAttempts = (getMessageById(selectedMessageId)?.verification_attempts || 0);
         const attemptsRemaining = 2 - updatedAttempts;
@@ -167,6 +217,20 @@ export default function ChatScreen() {
     } finally {
       setIsSecondaryVerifying(false);
     }
+  };
+
+  const handleManualLock = (messageId: string) => {
+    dispatch(manuallyLockMessage({ chatId, messageId }));
+    setUnlockedTimestamps(prev => {
+      const newState = { ...prev };
+      delete newState[messageId];
+      return newState;
+    });
+  };
+
+  const handleSosPress = () => {
+    console.log('SOS button pressed');
+    Alert.alert("SOS", "SOS functionality not yet implemented.");
   };
 
   if (isLoading && !chat) {
@@ -201,8 +265,11 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender === 'me';
+    const isCurrentlyUnlocked = item.is_verified && unlockedTimestamps[item.id] && (Date.now() - unlockedTimestamps[item.id] < AUTO_RELOCK_DURATION);
 
-    if (item.secondary_auth && !item.is_verified) {
+    if (item.secondary_auth && !isCurrentlyUnlocked) {
+      const timedOut = item.is_verified && !isCurrentlyUnlocked;
+
       return (
         <View style={[
           styles.messageBubble,
@@ -214,7 +281,7 @@ export default function ChatScreen() {
             styles.secondaryAuthText,
             isMe ? { color: 'rgba(255, 255, 255, 0.9)' } : { color: colors.text }
           ]}>
-            Secondary code required.
+            {timedOut ? "Message relocked (timed out)" : "Secondary code required."}
           </Text>
           <TouchableOpacity
             style={[styles.verifyButton, { borderColor: isMe ? 'rgba(255, 255, 255, 0.7)' : colors.tint }]}
@@ -238,6 +305,15 @@ export default function ChatScreen() {
         styles.messageBubble,
         isMe ? styles.myMessage : [styles.otherMessage, { backgroundColor: colorScheme === 'dark' ? '#333' : '#E5E5EA' }]
       ]}>
+        {item.secondary_auth && isCurrentlyUnlocked && (
+          <TouchableOpacity onPress={() => handleManualLock(item.id)} style={styles.lockIconWrapper}>
+            <Ionicons
+              name="lock-open-outline"
+              size={16}
+              color={isMe ? 'rgba(255, 255, 255, 0.7)' : colors.icon}
+            />
+          </TouchableOpacity>
+        )}
         <Text style={[
           styles.messageText,
           isMe ? styles.myMessageText : [styles.otherMessageText, { color: colors.text }]
@@ -255,144 +331,167 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <Stack.Screen
-        options={{
-          headerTitle: chat.name,
-          headerShown: true,
-          headerBackTitle: 'Back',
-          headerStyle: {
-            backgroundColor: colors.background,
-          },
-          headerTitleStyle: {
-            fontSize: 18,
-          },
-          headerTintColor: colors.text,
-          headerShadowVisible: false,
-        }}
-      />
-
-      <FlatList
-        ref={flatListRef}
-        data={chat.messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.messagesContainer}
-        inverted={false}
-      />
-
-      <View style={[
-        styles.inputContainer,
-        {
-          backgroundColor: colors.background,
-          borderTopColor: colorScheme === 'dark' ? '#333' : '#eee'
-        }
-      ]}>
-        <TextInput
-          style={[
-            styles.input,
-            {
-              borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
-              color: colors.text,
-              backgroundColor: colorScheme === 'dark' ? '#252525' : '#fff'
-            }
-          ]}
-          placeholder="Type a message..."
-          value={message}
-          onChangeText={handleTyping}
-          multiline
-          placeholderTextColor={colors.icon}
-          editable={!isSending}
-        />
-        {isSending ? (
-          <View style={styles.sendButton}>
-            <ActivityIndicator size="small" color={colors.tint} />
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.sendButton}
-            onPress={handleSend}
-            disabled={!message.trim()}
-          >
-            <Ionicons
-              name="send"
-              size={24}
-              color={message.trim() ? colors.tint : colors.icon}
-            />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={secondaryModalVisible}
-        onRequestClose={closeSecondaryModal}
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
       >
-        <View style={styles.modalCenteredView}>
-          <View style={[styles.modalView, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>Verify Message</Text>
-            <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
-              Enter the secondary code to view this message.
-            </Text>
+        <Stack.Screen options={{ headerShown: false }} />
 
-            <View style={[styles.inputContainer, { borderColor: colors.border }]}>
-              <TextInput
-                style={[styles.modalInput, { color: colors.text }]}
-                placeholder="Enter secondary code..."
-                placeholderTextColor={colors.icon}
-                value={enteredSecondaryCode}
-                onChangeText={setEnteredSecondaryCode}
-                secureTextEntry={!showSecondaryCode}
-                autoCapitalize="none"
-                editable={!isSecondaryVerifying}
-              />
-              <TouchableOpacity onPress={() => setShowSecondaryCode(!showSecondaryCode)} style={styles.eyeIcon}>
-                <Ionicons
-                  name={showSecondaryCode ? "eye-off-outline" : "eye-outline"}
-                  size={24}
-                  color={colors.icon}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {secondaryVerificationError && (
-              <Text style={styles.modalErrorText}>{secondaryVerificationError}</Text>
-            )}
-
-            {isSecondaryVerifying ? (
-              <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
-            ) : (
-              <View style={styles.modalButtonContainer}>
-                <Pressable
-                  style={[styles.modalButton, { backgroundColor: 'gray' }]}
-                  onPress={closeSecondaryModal}
-                >
-                  <Text style={styles.modalButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.modalButton, { backgroundColor: colors.tint }]}
-                  onPress={handleVerifySecondaryCode}
-                  disabled={!enteredSecondaryCode.trim()}
-                >
-                  <Text style={styles.modalButtonText}>Verify</Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
+        <View style={[styles.customHeader, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+            <Ionicons name="chevron-back" size={28} color={colors.tint} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+            {chat?.name || 'Chat'}
+          </Text>
+          <TouchableOpacity onPress={handleSosPress} style={styles.headerButton}>
+            <Ionicons name="warning-outline" size={26} color={'red'} />
+          </TouchableOpacity>
         </View>
-      </Modal>
-    </KeyboardAvoidingView>
+
+        <FlatList
+          ref={flatListRef}
+          data={chat?.messages || []}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.messagesContainer}
+          inverted={false}
+        />
+
+        <View style={[
+          styles.inputContainer,
+          {
+            backgroundColor: colors.background,
+            borderTopColor: colorScheme === 'dark' ? '#333' : '#eee'
+          }
+        ]}>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                borderColor: colorScheme === 'dark' ? '#333' : '#ddd',
+                color: colors.text,
+                backgroundColor: colorScheme === 'dark' ? '#252525' : '#fff'
+              }
+            ]}
+            placeholder="Type a message..."
+            value={message}
+            onChangeText={handleTyping}
+            multiline
+            placeholderTextColor={colors.icon}
+            editable={!isSending}
+          />
+          {isSending ? (
+            <View style={styles.sendButton}>
+              <ActivityIndicator size="small" color={colors.tint} />
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.sendButton}
+              onPress={handleSend}
+              disabled={!message.trim()}
+            >
+              <Ionicons
+                name="send"
+                size={24}
+                color={message.trim() ? colors.tint : colors.icon}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={secondaryModalVisible}
+          onRequestClose={closeSecondaryModal}
+        >
+          <View style={styles.modalCenteredView}>
+            <View style={[styles.modalView, { backgroundColor: colors.card }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Verify Message</Text>
+              <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
+                Enter the secondary code to view this message.
+              </Text>
+
+              <View style={[styles.modalInputContainer, { borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.modalInput, { color: colors.text }]}
+                  placeholder="Enter secondary code..."
+                  placeholderTextColor={colors.icon}
+                  value={enteredSecondaryCode}
+                  onChangeText={setEnteredSecondaryCode}
+                  secureTextEntry={!showSecondaryCode}
+                  autoCapitalize="none"
+                  editable={!isSecondaryVerifying}
+                />
+                <TouchableOpacity onPress={() => setShowSecondaryCode(!showSecondaryCode)} style={styles.eyeIcon}>
+                  <Ionicons
+                    name={showSecondaryCode ? "eye-off-outline" : "eye-outline"}
+                    size={24}
+                    color={colors.icon}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {secondaryVerificationError && (
+                <Text style={styles.modalErrorText}>{secondaryVerificationError}</Text>
+              )}
+
+              {isSecondaryVerifying ? (
+                <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
+              ) : (
+                <View style={styles.modalButtonContainer}>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: 'gray' }]}
+                    onPress={closeSecondaryModal}
+                  >
+                    <Text style={styles.modalButtonText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: colors.tint }]}
+                    onPress={handleVerifySecondaryCode}
+                    disabled={!enteredSecondaryCode.trim()}
+                  >
+                    <Text style={styles.modalButtonText}>Verify</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
+  },
+  customHeader: {
+    height: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerButton: {
+    padding: 5,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 17,
+    fontWeight: '600',
+    marginHorizontal: 10,
   },
   loadingContainer: {
     flex: 1,
@@ -413,6 +512,7 @@ const styles = StyleSheet.create({
   },
   messagesContainer: {
     padding: 15,
+    flexGrow: 1,
   },
   messageBubble: {
     maxWidth: '80%',
@@ -515,6 +615,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 14,
   },
+  modalInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 15,
+    width: '100%',
+  },
   modalInput: {
     flex: 1,
     height: 45,
@@ -553,5 +661,11 @@ const styles = StyleSheet.create({
   modalSpinner: {
     marginTop: 15,
     marginBottom: 15,
+  },
+  lockIconWrapper: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    padding: 3,
   },
 });

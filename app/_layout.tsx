@@ -103,7 +103,6 @@ function AppWrapper() {
     }
 
     // Get current route info for logging
-    const currentRoute = segments.join('/');
     const inAuthGroup = isAuthGroup(segments);
     
     // Need to check if the user is logged in or not
@@ -111,14 +110,12 @@ function AppWrapper() {
       if (!token) {
         // No token, redirect to auth unless already there
         if (!inAuthGroup && !hasRedirected.current) {
-          logAuth(`No token, redirecting from ${currentRoute} to login`);
           hasRedirected.current = true;
           router.replace('../(auth)');
         }
       } else {
         // Has token, redirect to main app unless already there
         if (inAuthGroup && !hasRedirected.current) {
-          logAuth(`Has token, redirecting from ${currentRoute} to main app`);
           hasRedirected.current = true;
           router.replace('../(tabs)');
         }
