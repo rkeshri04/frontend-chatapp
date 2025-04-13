@@ -8,12 +8,12 @@ import { logAuth, logAuthError } from '../../../utils/authLogger';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
 // Session constants
-// const SESSION_EXPIRE_TIME = (59 * 60 + 59) * 1000; // 59 minutes and 59 seconds in milliseconds
-// const EXPIRY_WARNING_TIME = 30 * 1000; // 30 seconds before expiry
+const SESSION_EXPIRE_TIME = (59 * 60 + 59) * 1000; // 59 minutes and 59 seconds in milliseconds
+const EXPIRY_WARNING_TIME = 30 * 1000; // 30 seconds before expiry
 
 // Test values for debugging
-const SESSION_EXPIRE_TIME = 7 * 1000; // 10 seconds for testing
-const EXPIRY_WARNING_TIME = 3 * 1000; // 5 seconds for testing
+// const SESSION_EXPIRE_TIME = 7 * 1000; // 10 seconds for testing
+// const EXPIRY_WARNING_TIME = 3 * 1000; // 5 seconds for testing
 
 interface AuthState {
   user: any | null;

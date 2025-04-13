@@ -160,20 +160,7 @@ export default function TabOneScreen() {
             Tap to view conversation!
           </Text>
           
-          <View style={styles.chatFooter}>
-            <Text 
-              style={[styles.lastMessage, { color: colors.icon }]} 
-              numberOfLines={1}
-            >
-              {item.lastMessage}
-            </Text>
-            
-            {item.unreadCount > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadText}>{item.unreadCount}</Text>
-              </View>
-            )}
-          </View>
+          
         </View>
       </TouchableOpacity>
     );
