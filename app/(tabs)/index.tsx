@@ -1,24 +1,25 @@
-import { useEffect, useState } from 'react'; // Removed useLayoutEffect
-import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Modal, TextInput, Pressable } from 'react-native';
-import { ThemedText } from '@/app-example/components/ThemedText';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Modal, TextInput, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchConversations, setCurrentChat, verifyConversationCode, fetchChatMessages } from '../store/slices/chatSlice';
+import { fetchConversations, setCurrentChat, verifyConversationCode, fetchChatMessages, approveConversation, selectMappedChats } from '../store/slices/chatSlice';
 import { logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
-import SearchUserOverlay from '../../components/SearchUserOverlay'; // Import the overlay component
+import SearchUserOverlay from '../../components/SearchUserOverlay';
 
-// Define the interface for chat items
 interface ChatItem {
   id: string;
   name: string;
   lastMessage?: string;
   unreadCount: number;
+  status?: 'pending' | 'approved' | 'rejected' | 'pending_approval' | 'pending_sent' | string;
+  otherUserId?: string | null;
 }
 
 export default function TabOneScreen() {
-  const chats = useAppSelector(state => state.chat.chats);
+  const chats: ChatItem[] = useAppSelector(selectMappedChats);
+  const currentUserId = useAppSelector(state => state.auth.user?.id);
   const isLoading = useAppSelector(state => state.chat.isLoading);
   const error = useAppSelector(state => state.chat.error);
   const token = useAppSelector(state => state.auth.token);
@@ -28,38 +29,35 @@ export default function TabOneScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [authError, setAuthError] = useState(false);
 
-  // State for verification modal
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
-  const [enteredCode, setEnteredCode] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationError, setVerificationError] = useState<string | null>(null);
-  const [showCode, setShowCode] = useState(false);
+  const [verifyModalVisible, setVerifyModalVisible] = useState(false);
+  const [selectedChatIdForVerify, setSelectedChatIdForVerify] = useState<string | null>(null);
+  const [enteredVerifyCode, setEnteredVerifyCode] = useState('');
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [verifyCodeError, setVerifyCodeError] = useState<string | null>(null);
+  const [showVerifyCode, setShowVerifyCode] = useState(false);
 
-  // State for overlay visibility
+  const [approveModalVisible, setApproveModalVisible] = useState(false);
+  const [selectedChatIdForApprove, setSelectedChatIdForApprove] = useState<string | null>(null);
+  const [enteredApproveCode, setEnteredApproveCode] = useState('');
+  const [confirmApproveCode, setConfirmApproveCode] = useState('');
+  const [isApproving, setIsApproving] = useState(false);
+  const [approveCodeError, setApproveCodeError] = useState<string | null>(null);
+  const [showApproveCode, setShowApproveCode] = useState(false);
+
   const [searchOverlayVisible, setSearchOverlayVisible] = useState(false);
 
-  // Fetch conversations when component mounts
   useEffect(() => {
     if (token) {
-      console.log('User has token, fetching conversations');
       loadConversations();
-    } else {
-      console.log('No token found, checking initialization status');
     }
   }, [dispatch, token]);
 
   const loadConversations = async () => {
     try {
       setRefreshing(true);
-      console.log('Loading conversations...');
       await dispatch(fetchConversations()).unwrap();
-      console.log('Conversations loaded successfully');
       setAuthError(false);
     } catch (error) {
-      console.error('Failed to load conversations:', error);
-
-      // Show error but don't automatically log out
       if (typeof error === 'string' && error.includes('Authentication failed')) {
         setAuthError(true);
       }
@@ -74,112 +72,172 @@ export default function TabOneScreen() {
     setRefreshing(false);
   };
 
-  const handleChatPress = (chatId: string) => {
-    // Instead of navigating directly, open the verification modal
-    setSelectedChatId(chatId);
-    setEnteredCode(''); // Clear previous code
-    setVerificationError(null); // Clear previous error
-    setIsVerifying(false); // Reset loading state
-    setShowCode(false); // Hide code initially
-    setModalVisible(true);
-  };
-
-  const handleVerifyCode = async () => {
-    if (!selectedChatId || !enteredCode.trim()) {
-      setVerificationError('Please enter the code.');
+  const handleChatPress = (chat: ChatItem) => {
+    if (chat.status === 'pending') {
+      if (chat.otherUserId !== currentUserId) {
+        Alert.alert("Request Pending", "This conversation request has not been approved yet.");
+      }
       return;
     }
 
-    setIsVerifying(true);
-    setVerificationError(null);
+    setSelectedChatIdForVerify(chat.id);
+    setEnteredVerifyCode('');
+    setVerifyCodeError(null);
+    setIsVerifyingCode(false);
+    setShowVerifyCode(false);
+    setVerifyModalVisible(true);
+  };
+
+  const handleVerifyPrimaryCode = async () => {
+    if (!selectedChatIdForVerify || !enteredVerifyCode.trim()) {
+      setVerifyCodeError('Please enter the code.');
+      return;
+    }
+
+    setIsVerifyingCode(true);
+    setVerifyCodeError(null);
 
     try {
-      // Dispatch the verification thunk
-      const resultAction = await dispatch(verifyConversationCode({ chatId: selectedChatId, code: enteredCode.trim() }));
+      const resultAction = await dispatch(verifyConversationCode({ chatId: selectedChatIdForVerify, code: enteredVerifyCode.trim() }));
 
-      // Check if the thunk fulfilled successfully
       if (verifyConversationCode.fulfilled.match(resultAction)) {
         const { chatId } = resultAction.payload;
-        const verifiedCode = enteredCode.trim(); // Store the verified code
-        console.log(`Code verified for chat ${chatId}. Setting current chat, fetching messages, and navigating.`);
-        
-        // --- Set current chat ID *before* fetching messages ---
-        dispatch(setCurrentChat(chatId)); 
-        // -----------------------------------------------------
+        const verifiedCode = enteredVerifyCode.trim();
 
-        // Code is valid, fetch messages first, passing the verified code
-        await dispatch(fetchChatMessages({ chatId, code: verifiedCode })).unwrap(); // Pass code here
-        
-        // Close modal and navigate, passing the code as a param
-        setModalVisible(false);
-        // Pass code as a query parameter
-        router.push({ 
-          pathname: `../chat/${chatId}`, 
-          params: { primaryCode: verifiedCode } 
-        }); 
+        dispatch(setCurrentChat(chatId));
+        await dispatch(fetchChatMessages({ chatId, code: verifiedCode })).unwrap();
+
+        setVerifyModalVisible(false);
+        router.push({
+          pathname: `../chat/${chatId}`,
+          params: { primaryCode: verifiedCode }
+        });
       } else {
-        // Handle rejection (invalid code or other errors from thunk)
         let errorMessage = 'Verification failed. Please try again.';
         if (resultAction.payload === 'Invalid code') {
           errorMessage = 'Invalid code. Please check and try again.';
         } else if (typeof resultAction.payload === 'string') {
-          errorMessage = resultAction.payload; // Use error message from thunk
+          errorMessage = resultAction.payload;
         }
-        console.error('Verification failed:', errorMessage);
-        setVerificationError(errorMessage);
+        setVerifyCodeError(errorMessage);
       }
     } catch (err: any) {
-      // Catch errors not handled by rejectWithValue (e.g., network issues before API call)
-      console.error('An unexpected error occurred during verification:', err);
-      setVerificationError('An error occurred. Please check your connection and try again.');
+      setVerifyCodeError('An error occurred. Please check your connection and try again.');
     } finally {
-      setIsVerifying(false);
+      setIsVerifyingCode(false);
     }
   };
 
-  const closeModal = () => {
-    setModalVisible(false);
-    setSelectedChatId(null);
+  const closeVerifyModal = () => {
+    setVerifyModalVisible(false);
+    setSelectedChatIdForVerify(null);
   };
 
-  const openConversationCodeModal = (chatId: string) => {
-    setSelectedChatId(chatId);
-    setEnteredCode(''); // Clear previous code
-    setVerificationError(null); // Clear previous error
-    setIsVerifying(false); // Reset loading state
-    setShowCode(false); // Hide code initially
-    setModalVisible(true); // Show the modal
+  const openApproveModal = (chatId: string) => {
+    setSelectedChatIdForApprove(chatId);
+    setEnteredApproveCode('');
+    setConfirmApproveCode('');
+    setApproveCodeError(null);
+    setIsApproving(false);
+    setShowApproveCode(false);
+    setApproveModalVisible(true);
+  };
+
+  const closeApproveModal = () => {
+    setApproveModalVisible(false);
+    setSelectedChatIdForApprove(null);
+  };
+
+  const handleApproveConversation = async () => {
+    if (!selectedChatIdForApprove) return;
+
+    if (!enteredApproveCode || !confirmApproveCode) {
+      setApproveCodeError('Please enter and confirm the code.');
+      return;
+    }
+    if (enteredApproveCode !== confirmApproveCode) {
+      setApproveCodeError('Codes do not match.');
+      return;
+    }
+
+    setIsApproving(true);
+    setApproveCodeError(null);
+
+    try {
+      await dispatch(approveConversation({ chatId: selectedChatIdForApprove, code: enteredApproveCode })).unwrap();
+      Alert.alert("Success", "Conversation approved!");
+      closeApproveModal();
+    } catch (error: any) {
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const handleRejectConversation = (chatId: string, chatName: string) => {
+    Alert.alert(
+      "Reject Conversation",
+      `Are you sure you want to reject the conversation request from ${chatName}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reject",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert("Info", "Reject functionality not yet implemented.");
+          },
+        },
+      ]
+    );
   };
 
   const renderChatItem = ({ item }: { item: ChatItem }) => {
+    const isIncomingRequest = item.status === 'pending_approval';
+    const isOutgoingRequest = item.status === 'pending' || item.status === 'pending_sent';
+
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={[
-          styles.chatItem, 
+          styles.chatItem,
           { backgroundColor: colors.background }
-        ]} 
-        onPress={() => handleChatPress(item.id)}
+        ]}
+        onPress={() => (isIncomingRequest ? null : handleChatPress(item))}
+        disabled={isIncomingRequest}
       >
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{item.name?.[0]?.toUpperCase() || '?'}</Text>
         </View>
-        
+
         <View style={styles.chatInfo}>
           <View style={styles.chatHeader}>
             <Text style={[styles.chatName, { color: colors.text }]}>{item.name}</Text>
           </View>
-          
-          <Text style={[styles.chatText, { color: colors.text, marginTop: 10 }]}>
-            Tap to view conversation!
-          </Text>
-          
-          
+
+          {isIncomingRequest ? (
+            <View style={styles.pendingActions}>
+              <Text style={[styles.pendingText, { color: colors.icon }]}>Incoming Request</Text>
+              <View style={styles.actionButtons}>
+                <TouchableOpacity onPress={() => openApproveModal(item.id)} style={styles.approveButton}>
+                  <Ionicons name="checkmark-circle" size={28} color="green" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleRejectConversation(item.id, item.name)} style={styles.rejectButton}>
+                  <Ionicons name="close-circle" size={28} color="red" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : isOutgoingRequest ? (
+            <Text style={[styles.chatText, { color: colors.icon, marginTop: 10, fontStyle: 'italic' }]}>
+              Request Sent
+            </Text>
+          ) : (
+            <Text style={[styles.chatText, { color: colors.text, marginTop: 10 }]}>
+              Tap to view conversation!
+            </Text>
+          )}
         </View>
       </TouchableOpacity>
     );
   };
 
-  // Render authentication error UI if needed
   if (authError) {
     return (
       <View style={[styles.container, styles.centerContent, { backgroundColor: colors.background }]}>
@@ -187,13 +245,13 @@ export default function TabOneScreen() {
           Authentication error. Your session may have expired.
         </Text>
         <View style={styles.buttonRow}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.button, { backgroundColor: colors.tint }]}
             onPress={loadConversations}
           >
             <Text style={styles.buttonText}>Retry</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.button, { backgroundColor: 'gray' }]}
             onPress={() => {
               dispatch(logout());
@@ -215,21 +273,21 @@ export default function TabOneScreen() {
             <ActivityIndicator size="large" color={colors.tint} />
           </View>
         )}
-        
+
         {error && (
           <View style={styles.errorContainer}>
             <Text style={[styles.errorText, { color: colors.text }]}>
               {error}
             </Text>
-            <TouchableOpacity 
-              style={[styles.retryButton, { backgroundColor: colors.tint }]} 
+            <TouchableOpacity
+              style={[styles.retryButton, { backgroundColor: colors.tint }]}
               onPress={loadConversations}
             >
               <Text style={styles.retryButtonText}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}
-        
+
         {!isLoading && !error && chats.length === 0 && (
           <View style={styles.emptyContainer}>
             <Ionicons name="chatbubble-ellipses-outline" size={60} color={colors.icon} />
@@ -241,7 +299,7 @@ export default function TabOneScreen() {
             </Text>
           </View>
         )}
-        
+
         <FlatList
           data={chats}
           renderItem={renderChatItem}
@@ -277,20 +335,19 @@ export default function TabOneScreen() {
             ) : null
           }
         />
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={[styles.fabButton, { backgroundColor: colors.tint }]}
-          onPress={() => setSearchOverlayVisible(true)} // Open search overlay
+          onPress={() => setSearchOverlayVisible(true)}
         >
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
 
-        {/* Verification Modal */}
         <Modal
           animationType="slide"
           transparent={true}
-          visible={modalVisible}
-          onRequestClose={closeModal}
+          visible={verifyModalVisible}
+          onRequestClose={closeVerifyModal}
         >
           <View style={styles.modalCenteredView}>
             <View style={[styles.modalView, { backgroundColor: colors.card }]}>
@@ -298,45 +355,45 @@ export default function TabOneScreen() {
               <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
                 Please enter the code provided to access this conversation.
               </Text>
-              
+
               <View style={[styles.inputContainer, { borderColor: colors.border }]}>
                 <TextInput
                   style={[styles.modalInput, { color: colors.text }]}
                   placeholder="Enter code..."
                   placeholderTextColor={colors.icon}
-                  value={enteredCode}
-                  onChangeText={setEnteredCode}
-                  secureTextEntry={!showCode}
+                  value={enteredVerifyCode}
+                  onChangeText={setEnteredVerifyCode}
+                  secureTextEntry={!showVerifyCode}
                   autoCapitalize="none"
-                  editable={!isVerifying}
+                  editable={!isVerifyingCode}
                 />
-                <TouchableOpacity onPress={() => setShowCode(!showCode)} style={styles.eyeIcon}>
-                  <Ionicons 
-                    name={showCode ? "eye-off-outline" : "eye-outline"} 
-                    size={24} 
-                    color={colors.icon} 
+                <TouchableOpacity onPress={() => setShowVerifyCode(!showVerifyCode)} style={styles.eyeIcon}>
+                  <Ionicons
+                    name={showVerifyCode ? "eye-off-outline" : "eye-outline"}
+                    size={24}
+                    color={colors.icon}
                   />
                 </TouchableOpacity>
               </View>
 
-              {verificationError && (
-                <Text style={styles.modalErrorText}>{verificationError}</Text>
+              {verifyCodeError && (
+                <Text style={styles.modalErrorText}>{verifyCodeError}</Text>
               )}
 
-              {isVerifying ? (
+              {isVerifyingCode ? (
                 <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
               ) : (
                 <View style={styles.modalButtonContainer}>
                   <Pressable
                     style={[styles.modalButton, { backgroundColor: 'gray' }]}
-                    onPress={closeModal}
+                    onPress={closeVerifyModal}
                   >
                     <Text style={styles.modalButtonText}>Cancel</Text>
                   </Pressable>
                   <Pressable
                     style={[styles.modalButton, { backgroundColor: colors.tint }]}
-                    onPress={handleVerifyCode}
-                    disabled={!enteredCode.trim()}
+                    onPress={handleVerifyPrimaryCode}
+                    disabled={!enteredVerifyCode.trim()}
                   >
                     <Text style={styles.modalButtonText}>Verify</Text>
                   </Pressable>
@@ -346,7 +403,86 @@ export default function TabOneScreen() {
           </View>
         </Modal>
 
-        {/* Search User Overlay */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={approveModalVisible}
+          onRequestClose={closeApproveModal}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalCenteredView}
+          >
+            <View style={[styles.modalView, { backgroundColor: colors.card }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Approve Conversation</Text>
+              <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
+                Set a secure code for this conversation. Share it only with the other participant.
+              </Text>
+
+              <View style={[styles.inputContainer, { borderColor: colors.border, marginBottom: 10 }]}>
+                <TextInput
+                  style={[styles.modalInput, { color: colors.text }]}
+                  placeholder="Enter secure code"
+                  placeholderTextColor={colors.icon}
+                  value={enteredApproveCode}
+                  onChangeText={setEnteredApproveCode}
+                  secureTextEntry={!showApproveCode}
+                  autoCapitalize="none"
+                  editable={!isApproving}
+                />
+                <TouchableOpacity onPress={() => setShowApproveCode(!showApproveCode)} style={styles.eyeIcon}>
+                  <Ionicons
+                    name={showApproveCode ? "eye-off-outline" : "eye-outline"}
+                    size={24}
+                    color={colors.icon}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={[styles.inputContainer, { borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.modalInput, { color: colors.text }]}
+                  placeholder="Confirm secure code"
+                  placeholderTextColor={colors.icon}
+                  value={confirmApproveCode}
+                  onChangeText={setConfirmApproveCode}
+                  secureTextEntry={!showApproveCode}
+                  autoCapitalize="none"
+                  editable={!isApproving}
+                />
+              </View>
+
+              {approveCodeError && (
+                <Text style={styles.modalErrorText}>{approveCodeError}</Text>
+              )}
+
+              {isApproving ? (
+                <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
+              ) : (
+                <View style={styles.modalButtonContainer}>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: 'gray' }]}
+                    onPress={closeApproveModal}
+                  >
+                    <Text style={styles.modalButtonText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: colors.tint },
+                      (!enteredApproveCode || enteredApproveCode !== confirmApproveCode) && styles.disabledButton
+                    ]}
+                    onPress={handleApproveConversation}
+                    disabled={!enteredApproveCode || enteredApproveCode !== confirmApproveCode}
+                  >
+                    <Text style={styles.modalButtonText}>Approve</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
         <SearchUserOverlay
           visible={searchOverlayVisible}
           onClose={() => setSearchOverlayVisible(false)}
@@ -401,6 +537,7 @@ const styles = StyleSheet.create({
   },
   chatInfo: {
     flex: 1,
+    justifyContent: 'center',
   },
   chatHeader: {
     flexDirection: 'row',
@@ -416,29 +553,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     opacity: 0.7,
   },
-  chatFooter: {
+  pendingActions: {
+    marginTop: 5,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  lastMessage: {
-    flex: 1,
+  pendingText: {
     fontSize: 14,
+    fontStyle: 'italic',
+    flexShrink: 1,
   },
-  unreadBadge: {
-    backgroundColor: '#0a7ea4',
-    borderRadius: 10,
-    height: 20,
-    minWidth: 20,
-    justifyContent: 'center',
+  actionButtons: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 5,
-    marginLeft: 5,
+    marginLeft: 10,
   },
-  unreadText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
+  approveButton: {
+    padding: 5,
+  },
+  rejectButton: {
+    padding: 5,
+    marginLeft: 8,
   },
   emptyContainer: {
     flex: 1,
@@ -527,13 +663,11 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
   },
-  // Modal Styles
   modalCenteredView: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    zIndex: 10, // Add zIndex to ensure it's on top
   },
   modalView: {
     margin: 20,
@@ -541,15 +675,11 @@ const styles = StyleSheet.create({
     padding: 35,
     alignItems: "center",
     shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 4,
-    elevation: 5, // Ensure elevation for Android
+    elevation: 5,
     width: '85%',
-    // Ensure background color is applied (already using colors.card)
   },
   modalTitle: {
     marginBottom: 8,
@@ -608,5 +738,8 @@ const styles = StyleSheet.create({
   modalSpinner: {
     marginTop: 15,
     marginBottom: 15,
+  },
+  disabledButton: {
+    opacity: 0.5,
   },
 });

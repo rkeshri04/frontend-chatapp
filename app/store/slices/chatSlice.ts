@@ -1,7 +1,9 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, createAsyncThunk, PayloadAction, createSelector } from '@reduxjs/toolkit'; // Import createSelector
 import axios from 'axios';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
+import { RootState } from '../store'; // Adjust path if necessary
+import { Alert } from 'react-native'; // Import Alert
 
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
@@ -29,7 +31,7 @@ interface Chat {
   unreadCount: number;
   messages: Message[];
   otherUser?: OtherUser | null;
-  status?: string;
+  status?: 'pending' | 'approved' | 'rejected' | string; // Make status more specific if possible
 }
 
 interface ChatState {
@@ -49,7 +51,7 @@ const initialState: ChatState = {
 };
 
 // Helper function to get authorization headers and user ID
-const getAuthHeadersAndUserId = async (state) => {
+const getAuthHeadersAndUserId = async (state: RootState) => {
   let token = state?.auth?.token;
   const userId = state?.auth?.user?.id; // Get user ID from auth state
   const language = state?.auth?.user?.default_language || 'en';
@@ -68,6 +70,7 @@ const getAuthHeadersAndUserId = async (state) => {
     headers: {
       Authorization: authToken,
       'X-User-Language': language,
+      'Content-Type': 'application/json', // Ensure Content-Type is set
     },
     userId: userId, // Return userId along with headers
   };
@@ -442,6 +445,81 @@ export const fetchUnlockedMessage = createAsyncThunk(
   }
 );
 
+// Async thunk to request a new conversation
+export const requestConversation = createAsyncThunk<
+  { success: boolean; user2_id: string }, // Return type on success
+  { user2_id: string }, // Argument type
+  { rejectValue: string; state: RootState } // ThunkApi config
+>(
+  'chat/requestConversation',
+  async ({ user2_id }, { getState, rejectWithValue }) => {
+    try {
+      const state = getState();
+      const { headers, userId: user1_id } = await getAuthHeadersAndUserId(state);
+
+      if (!user1_id) {
+        return rejectWithValue('Logged in user ID not found.');
+      }
+
+      console.log(`Requesting conversation between ${user1_id} and ${user2_id}`);
+
+      const response = await axios.post(
+        `${API_URL}/chat/conversations/request`,
+        { user1_id, user2_id },
+        { headers }
+      );
+
+      // Assuming the backend returns a success status or relevant data
+      console.log('Conversation request response:', response.data);
+      if (response.status === 200 || response.status === 201) {
+        return { success: true, user2_id }; // Indicate success and which user was requested
+      } else {
+        return rejectWithValue('Failed to request conversation.');
+      }
+    } catch (error: any) {
+      console.error('Error requesting conversation:', error.response?.data || error.message);
+      const errorMessage = error.response?.data?.detail || error.message || 'An unknown error occurred';
+      return rejectWithValue(errorMessage);
+    }
+  }
+);
+
+// Async thunk to approve a conversation request
+export const approveConversation = createAsyncThunk<
+  { chatId: string; status: string }, // Return type on success
+  { chatId: string; code: string }, // Argument type
+  { rejectValue: string; state: RootState } // ThunkApi config
+>(
+  'chat/approveConversation',
+  async ({ chatId, code }, { getState, rejectWithValue }) => {
+    try {
+      const state = getState();
+      const { headers } = await getAuthHeadersAndUserId(state);
+
+      console.log(`Approving conversation ${chatId} with code.`);
+
+      const response = await axios.post(
+        `${API_URL}/chat/conversations/${chatId}/approve`,
+        { code }, // Send the code in the request body
+        { headers }
+      );
+
+      console.log('Approve conversation response:', response.data);
+      // Assuming the backend confirms approval, maybe returns the updated status
+      if (response.status === 200 || response.status === 204) {
+         // You might want the backend to return the new status, default to 'approved'
+        return { chatId, status: response.data?.status || 'approved' };
+      } else {
+        return rejectWithValue('Failed to approve conversation.');
+      }
+    } catch (error: any) {
+      console.error('Error approving conversation:', error.response?.data || error.message);
+      const errorMessage = error.response?.data?.detail || error.message || 'An unknown error occurred during approval';
+      return rejectWithValue(errorMessage);
+    }
+  }
+);
+
 const chatSlice = createSlice({
   name: 'chat',
   initialState,
@@ -476,8 +554,8 @@ const chatSlice = createSlice({
       const chat = state.chats.find(c => c.id === chatId);
       if (chat) {
         const message = chat.messages.find(m => m.id === messageId);
-        if (message && message.secondary_auth) {
-          message.is_verified = false;
+        if (message && message.is_verified) {
+          message.is_verified = false; // Mark as locked again
         }
       }
     },
@@ -490,7 +568,11 @@ const chatSlice = createSlice({
       })
       .addCase(fetchConversations.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.chats = action.payload;
+        // Ensure status is mapped correctly
+        state.chats = action.payload.map(chat => ({
+          ...chat,
+          status: chat.status || 'approved' // Default to approved if status is missing? Adjust as needed.
+        }));
       })
       .addCase(fetchConversations.rejected, (state, action) => {
         state.isLoading = false;
@@ -594,9 +676,52 @@ const chatSlice = createSlice({
       .addCase(fetchUnlockedMessage.rejected, (state, action) => {
         const { messageId } = action.meta.arg;
         console.error(`Failed to fetch unlocked content for message ${messageId}. Error: ${action.payload}`);
+      })
+      .addCase(requestConversation.pending, (state) => {
+        console.log('Conversation request pending...');
+      })
+      .addCase(requestConversation.fulfilled, (state, action) => {
+        console.log(`Conversation request successful for user: ${action.payload.user2_id}`);
+      })
+      .addCase(requestConversation.rejected, (state, action) => {
+        console.error('Conversation request failed:', action.payload);
+      })
+      .addCase(approveConversation.pending, (state, action) => {
+        console.log(`Approval pending for chat ${action.meta.arg.chatId}...`);
+      })
+      .addCase(approveConversation.fulfilled, (state, action) => {
+        const { chatId, status } = action.payload;
+        const chat = state.chats.find(c => c.id === chatId);
+        if (chat) {
+          chat.status = status; // Update the status of the specific chat
+          console.log(`Chat ${chatId} status updated to ${status}`);
+        }
+      })
+      .addCase(approveConversation.rejected, (state, action) => {
+        const { chatId } = action.meta.arg;
+        console.error(`Failed to approve chat ${chatId}:`, action.payload);
+        Alert.alert("Approval Failed", action.payload || "Could not approve conversation.");
       });
   },
 });
+
+// --- Selectors ---
+
+// Base selector for the raw chats array
+const selectChats = (state: RootState) => state.chat.chats;
+
+// Memoized selector to map chats for the UI
+export const selectMappedChats = createSelector(
+  [selectChats], // Input selector(s)
+  (chats) => chats.map(chat => ({ // Transformation function
+    id: chat.id,
+    name: chat.name,
+    lastMessage: chat.lastMessage,
+    unreadCount: chat.unreadCount,
+    status: chat.status,
+    otherUserId: chat.otherUser?.id,
+  }))
+);
 
 export const { setCurrentChat, clearCurrentChat, receiveMessage, manuallyLockMessage } = chatSlice.actions;
 
