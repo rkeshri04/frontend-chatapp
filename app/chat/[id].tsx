@@ -3,6 +3,7 @@ import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, 
 import { useLocalSearchParams, useRouter, Stack, useNavigation } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, verifySecondaryCode, fetchUnlockedMessage, manuallyLockMessage } from '../store/slices/chatSlice';
+import { logout } from '../store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -73,6 +74,7 @@ export default function ChatScreen() {
   const [confirmSecondaryCode, setConfirmSecondaryCode] = useState('');
   const [sendSecondaryCodeError, setSendSecondaryCodeError] = useState<string | null>(null);
   const [showEnteredSecondaryCode, setShowEnteredSecondaryCode] = useState(false);
+  const [secondaryVerifyAttempts, setSecondaryVerifyAttempts] = useState(0);
 
   useEffect(() => {
     if (!chat) {
@@ -196,12 +198,14 @@ export default function ChatScreen() {
     setSecondaryVerificationError(null);
     setIsSecondaryVerifying(false);
     setShowSecondaryCode(false);
+    setSecondaryVerifyAttempts(0);
     setSecondaryModalVisible(true);
   };
 
   const closeSecondaryModal = () => {
     setSecondaryModalVisible(false);
     setSelectedMessageId(null);
+    setSecondaryVerifyAttempts(0);
   };
 
   const handleVerifySecondaryCode = async () => {
@@ -249,12 +253,12 @@ export default function ChatScreen() {
           }));
         }
       } else {
-        const updatedAttempts = (getMessageById(selectedMessageId)?.verification_attempts || 0);
-        const attemptsRemaining = 2 - updatedAttempts;
+        const updatedAttempts = secondaryVerifyAttempts + 1;
+        setSecondaryVerifyAttempts(updatedAttempts);
 
         let errorMessage = 'Verification failed.';
         if (verifyResultAction.payload === 'Invalid secondary code') {
-          errorMessage = `Invalid secondary code. ${attemptsRemaining > 0 ? `${attemptsRemaining} attempt${attemptsRemaining > 1 ? 's' : ''} remaining.` : 'No attempts remaining.'}`;
+          errorMessage = `Invalid secondary code. Attempt ${updatedAttempts} of 3.`;
         } else if (verifyResultAction.payload === 'Primary conversation code not found. Cannot verify secondary code.') {
           errorMessage = 'Verification error: Missing primary code context.';
         } else if (typeof verifyResultAction.payload === 'string') {
@@ -262,19 +266,33 @@ export default function ChatScreen() {
         }
 
         setSecondaryVerificationError(errorMessage);
-        console.error(`Secondary verification failed for ${selectedMessageId}. Attempts: ${updatedAttempts}. Error: ${verifyResultAction.payload}`);
 
-        if (updatedAttempts >= 2) {
-          Alert.alert('Maximum verification attempts reached.', 'Returning to conversations list.');
+        if (updatedAttempts >= 3 && verifyResultAction.payload === 'Invalid secondary code') {
+          setIsSecondaryVerifying(false);
           closeSecondaryModal();
-          router.replace('../(tabs)');
+
+          Alert.alert(
+            "Too Many Failed Attempts",
+            "You have entered the wrong secondary code too many times. You will be logged out.",
+            [{ text: "OK", onPress: async () => {
+                try {
+                  await dispatch(logout()).unwrap();
+                  requestAnimationFrame(() => {
+                    router.replace('../(auth)');
+                  });
+                } catch (logoutError) {
+                   console.error("Logout failed after failed secondary attempts:", logoutError);
+                   Alert.alert("Logout Error", "Failed to log out automatically.");
+                }
+            }}]
+          );
+          return;
         }
+        setIsSecondaryVerifying(false);
       }
     } catch (err: any) {
       console.error('An unexpected error occurred during secondary verification/unlock:', err);
       setSecondaryVerificationError('An error occurred. Please try again.');
-    } finally {
-      setIsSecondaryVerifying(false);
     }
   };
 

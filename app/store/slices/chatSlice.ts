@@ -51,10 +51,11 @@ const initialState: ChatState = {
 };
 
 // Helper function to get authorization headers and user ID
-const getAuthHeadersAndUserId = async (state: RootState) => {
-  let token = state?.auth?.token;
-  const userId = state?.auth?.user?.id; // Get user ID from auth state
-  const language = state?.auth?.user?.default_language || 'en';
+const getAuthHeadersAndUserId = async (state: unknown) => {
+  const typedState = state as RootState;
+  let token = typedState?.auth?.token;
+  const userId = typedState?.auth?.user?.id; // Get user ID from auth state
+  const language = typedState?.auth?.user?.default_language || 'en';
 
   if (!token) {
     token = await SecureStore.getItemAsync('token');
@@ -85,7 +86,7 @@ export const fetchConversations = createAsyncThunk(
 
       const response = await axios.get(`${API_URL}/chat/conversations/`, { headers: headers.headers });
 
-      let conversations = [];
+      let conversations: Chat[] = [];
 
       if (Array.isArray(response.data)) {
         conversations = response.data.map(conversation => ({
@@ -182,7 +183,7 @@ export const sendMessage = createAsyncThunk(
         chatId,
         message: newMessage,
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Send message error:', error.response?.data || error.message);
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
