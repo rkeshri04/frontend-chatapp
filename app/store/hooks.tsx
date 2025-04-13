@@ -8,5 +8,4 @@ export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
 
 // Add a default export to fix the route issue
 export default function HooksComponent() {
-  return <Text>This component is not meant to be rendered directly</Text>;
 }

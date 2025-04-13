@@ -8,8 +8,12 @@ import { logAuth, logAuthError } from '../../../utils/authLogger';
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
 // Session constants
-const SESSION_EXPIRE_TIME = 59 * 60 * 1000; // 59 minutes in milliseconds
-const EXPIRY_WARNING_TIME = 30 * 1000; // 30 seconds before expiry
+// const SESSION_EXPIRE_TIME = (59 * 60 + 59) * 1000; // 59 minutes and 59 seconds in milliseconds
+// const EXPIRY_WARNING_TIME = 30 * 1000; // 30 seconds before expiry
+
+// Test values for debugging
+const SESSION_EXPIRE_TIME = 7 * 1000; // 10 seconds for testing
+const EXPIRY_WARNING_TIME = 3 * 1000; // 5 seconds for testing
 
 interface AuthState {
   user: any | null;
@@ -254,27 +258,30 @@ export const checkSessionExpiry = createAsyncThunk(
   async (_, { getState, dispatch }) => {
     try {
       const state = getState() as { auth: AuthState };
-      
+
       if (state.auth.token && state.auth.sessionExpiryTime) {
         const now = Date.now();
         const timeUntilExpiry = state.auth.sessionExpiryTime - now;
-        
+
+        // Check if session has expired
+        if (now >= state.auth.sessionExpiryTime) {
+          logAuth('Session expired, dispatching logout');
+          // Dispatch logout action to clear credentials and trigger redirect
+          await dispatch(logout()).unwrap(); 
+          return { showWarning: false, expired: true }; 
+        }
+
         // Check if it's time to show expiry warning (30 seconds before expiry)
         if (timeUntilExpiry <= EXPIRY_WARNING_TIME && timeUntilExpiry > 0) {
           return { showWarning: true, expired: false };
         }
-        
-        // Check if session has expired
-        if (now >= state.auth.sessionExpiryTime) {
-          console.log('Session expired, logging out');
-          dispatch(logout());
-          return { showWarning: false, expired: true };
-        }
+
       }
+      // If no token or expiry time, or not expired/warning time, return default
       return { showWarning: false, expired: false };
     } catch (error) {
-      console.error('Error checking session expiry:', error);
-      return { showWarning: false, expired: false };
+      logAuthError('Error checking session expiry', error);
+      return { showWarning: false, expired: false }; 
     }
   }
 );
@@ -419,7 +426,8 @@ const authSlice = createSlice({
         state.user = null;
         state.token = null;
         state.sessionExpiryTime = null;
-        // Keep initialized as true since we know the auth state
+        state.showExpiryWarning = false; // Also clear warning on logout
+        // Keep initialized as true since we know the auth state (logged out)
       })
       .addCase(logout.rejected, (state, action) => {
         logAuthError('Logout failed', action.payload);

@@ -6,12 +6,13 @@ import { useAppSelector } from '../app/store/hooks';
 const SessionExpiryNotification = () => {
   const showWarning = useAppSelector(state => state.auth.showExpiryWarning);
   const sessionExpiryTime = useAppSelector(state => state.auth.sessionExpiryTime);
+  const token = useAppSelector(state => state.auth.token); 
   const [seconds, setSeconds] = useState(30);
   const slideAnim = useState(new Animated.Value(-100))[0];
 
   // Calculate and update remaining seconds
   useEffect(() => {
-    if (showWarning && sessionExpiryTime) {
+    if (showWarning && sessionExpiryTime && token) { 
       // Calculate seconds left
       const updateTimer = () => {
         const now = Date.now();
@@ -31,12 +32,12 @@ const SessionExpiryNotification = () => {
       
       return () => clearInterval(timerId);
     } else {
-      // Reset the animation when not showing
-      slideAnim.setValue(-100);
+      // Reset the animation when not showing or if token is removed
+      slideAnim.setValue(-100); 
     }
-  }, [showWarning, sessionExpiryTime, slideAnim]);
+  }, [showWarning, sessionExpiryTime, token, slideAnim]); 
 
-  if (!showWarning) {
+  if (!showWarning || !token) { 
     return null;
   }
 
