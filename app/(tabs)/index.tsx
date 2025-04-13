@@ -209,7 +209,6 @@ export default function TabOneScreen() {
 
   return (
     <>
-      {/* <SafeAreaView style={{ backgroundColor: colors.background}} /> */}
       <View style={[styles.container, { backgroundColor: colors.background }]}>
         {isLoading && !refreshing && (
           <View style={styles.loadingContainer}>
@@ -375,7 +374,9 @@ const styles = StyleSheet.create({
     height: 80,
     flexDirection: 'row',
     padding: 15,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomRightRadius: 20,
+    borderBottomLeftRadius: 20,
     borderBottomColor: '#eee',
   },
   avatar: {

@@ -20,7 +20,7 @@ export default function Register() {
     try {
       const result = await dispatch(register({ name, email, password })).unwrap();
       if (result) {
-        router.replace('/(tabs)');
+        router.replace('../(tabs)');
       }
     } catch (error) {
       Alert.alert('Registration Failed', error as string);
@@ -64,7 +64,7 @@ export default function Register() {
       
       <View style={styles.footer}>
         <Text>Already have an account? </Text>
-        <TouchableOpacity onPress={() => router.push('/(auth)')}>
+        <TouchableOpacity onPress={() => router.push('../(auth)')}>
           <Text style={styles.linkText}>Sign In</Text>
         </TouchableOpacity>
       </View>
