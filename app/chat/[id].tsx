@@ -8,9 +8,9 @@ import { useAppTheme } from '../hooks/useAppTheme';
 
 interface Message {
   id: string;
+  sender_id: string | null; // Add sender_id
   text: string; // Main text (translated or original)
   originalText: string | null; // Original text from backend
-  sender: string;
   timestamp: string | number | Date;
   secondary_auth?: boolean;
   is_verified?: boolean;
@@ -40,6 +40,9 @@ export default function ChatScreen() {
   const { colors, colorScheme } = useAppTheme();
   const flatListRef = useRef<FlatList>(null);
 
+  // Get current user ID from auth state
+  const currentUserId = useAppSelector(state => state.auth.user?.id);
+
   const chat = useAppSelector(state =>
     state.chat.chats.find(c => c.id === chatId)
   );
@@ -63,6 +66,13 @@ export default function ChatScreen() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentAttempts = getMessageById(selectedMessageId)?.verification_attempts || 0;
+
+  const [isSecondaryAuthEnabled, setIsSecondaryAuthEnabled] = useState(false);
+  const [showSendSecondaryModal, setShowSendSecondaryModal] = useState(false);
+  const [secondaryCodeToSend, setSecondaryCodeToSend] = useState('');
+  const [confirmSecondaryCode, setConfirmSecondaryCode] = useState('');
+  const [sendSecondaryCodeError, setSendSecondaryCodeError] = useState<string | null>(null);
+  const [showEnteredSecondaryCode, setShowEnteredSecondaryCode] = useState(false);
 
   useEffect(() => {
     if (!chat) {
@@ -122,14 +132,57 @@ export default function ChatScreen() {
   const handleSend = async () => {
     if (!message.trim() || !chatId) return;
 
+    if (isSecondaryAuthEnabled) {
+      setSecondaryCodeToSend('');
+      setConfirmSecondaryCode('');
+      setSendSecondaryCodeError(null);
+      setShowSendSecondaryModal(true);
+    } else {
+      try {
+        setIsSending(true);
+        await dispatch(sendMessage({ chatId: chatId, text: message.trim() })).unwrap();
+        setMessage('');
+      } catch (error) {
+        console.error('Failed to send message:', error);
+      } finally {
+        setIsSending(false);
+      }
+    }
+  };
+
+  const handleConfirmSendSecondary = async () => {
+    if (!secondaryCodeToSend || !confirmSecondaryCode) {
+      setSendSecondaryCodeError('Please enter and confirm the code.');
+      return;
+    }
+    if (secondaryCodeToSend !== confirmSecondaryCode) {
+      setSendSecondaryCodeError('Codes do not match.');
+      return;
+    }
+    if (!message.trim() || !chatId) {
+      setSendSecondaryCodeError('Message cannot be empty.');
+      return;
+    }
+
+    setSendSecondaryCodeError(null);
+    setIsSending(true);
+    setShowSendSecondaryModal(false);
+
     try {
-      setIsSending(true);
-      await dispatch(sendMessage({ chatId: chatId, text: message.trim() })).unwrap();
+      await dispatch(sendMessage({
+        chatId: chatId,
+        text: message.trim(),
+        secondaryAuth: true,
+        secondaryCode: secondaryCodeToSend
+      })).unwrap();
       setMessage('');
+      setIsSecondaryAuthEnabled(false);
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('Failed to send secondary auth message:', error);
     } finally {
       setIsSending(false);
+      setSecondaryCodeToSend('');
+      setConfirmSecondaryCode('');
     }
   };
 
@@ -277,13 +330,14 @@ export default function ChatScreen() {
   }
 
   const renderMessage = ({ item }: { item: Message }) => {
-    const isMe = item.sender === 'me';
-    const isCurrentlyUnlocked = item.is_verified && unlockedTimestamps[item.id] && (Date.now() - unlockedTimestamps[item.id] < AUTO_RELOCK_DURATION);
+    const isMe = item.sender_id === currentUserId;
+    const isCurrentlyUnlocked = item.is_verified === true && unlockedTimestamps[item.id] && (Date.now() - unlockedTimestamps[item.id] < AUTO_RELOCK_DURATION);
     const canShowOriginal = item.originalText && item.originalText !== item.text;
     const isOriginalExpanded = expandedMessages[item.id] === true;
 
+    // Logic for displaying locked messages
     if (item.secondary_auth && !isCurrentlyUnlocked) {
-      const timedOut = item.is_verified && !isCurrentlyUnlocked;
+      const timedOut = item.is_verified === true && !isCurrentlyUnlocked && !isMe;
 
       return (
         <View style={[
@@ -296,18 +350,27 @@ export default function ChatScreen() {
               styles.secondaryAuthText,
               isMe ? { color: 'rgba(255, 255, 255, 0.9)' } : { color: colors.text }
             ]} numberOfLines={1} ellipsizeMode='tail'>
-              {timedOut ? "Relocked" : "Code Required"}
+              {isMe ? "Sent (Locked)" : (timedOut ? "Relocked" : "Code Required")}
             </Text>
+            {/* Allow Verify button for both received and own locked messages */}
             <TouchableOpacity
-              style={[styles.verifyButton, { borderColor: isMe ? 'rgba(255, 255, 255, 0.7)' : colors.tint }]}
+              style={[
+                styles.verifyButton,
+                { borderColor: isMe ? 'rgba(255, 255, 255, 0.7)' : colors.tint }
+              ]}
               onPress={() => openSecondaryVerifyModal(item.id)}
             >
-              <Text style={[styles.verifyButtonText, { color: isMe ? '#fff' : colors.tint }]}>Verify</Text>
+              <Text style={[
+                styles.verifyButtonText,
+                { color: isMe ? '#fff' : colors.tint }
+              ]}>
+                Verify
+              </Text>
             </TouchableOpacity>
           </View>
           <Text style={[
             styles.messageTime,
-            !isMe && { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' },
+            isMe ? {} : { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' },
             { marginTop: 4 }
           ]}>
             {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -316,6 +379,7 @@ export default function ChatScreen() {
       );
     }
 
+    // Logic for displaying unlocked/normal messages
     return (
       <View style={[
         styles.messageBubble,
@@ -357,7 +421,7 @@ export default function ChatScreen() {
           )}
           <Text style={[
             styles.messageTime,
-            !isMe && { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' }
+            isMe ? {} : { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' }
           ]}>
             {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
@@ -370,8 +434,8 @@ export default function ChatScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 50 : 0}
       >
         <Stack.Screen options={{ headerShown: false }} />
 
@@ -393,6 +457,7 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderMessage}
           contentContainerStyle={styles.messagesContainer}
+          style={{ flex: 1 }}
           inverted={false}
         />
 
@@ -403,6 +468,17 @@ export default function ChatScreen() {
             borderTopColor: colorScheme === 'dark' ? '#333' : '#eee'
           }
         ]}>
+          <TouchableOpacity
+            style={styles.secondaryAuthToggle}
+            onPress={() => setIsSecondaryAuthEnabled(!isSecondaryAuthEnabled)}
+          >
+            <Ionicons
+              name={isSecondaryAuthEnabled ? "lock-closed" : "lock-open-outline"}
+              size={24}
+              color={isSecondaryAuthEnabled ? colors.tint : colors.icon}
+            />
+          </TouchableOpacity>
+
           <TextInput
             style={[
               styles.input,
@@ -496,6 +572,86 @@ export default function ChatScreen() {
               )}
             </View>
           </View>
+        </Modal>
+
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={showSendSecondaryModal}
+          onRequestClose={() => setShowSendSecondaryModal(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalCenteredView}
+          >
+            <View style={[styles.modalView, { backgroundColor: colors.card }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Set Secondary Code</Text>
+              <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
+                Enter and confirm a code for this secure message.
+              </Text>
+
+              <View style={[styles.modalInputContainer, { borderColor: colors.border, marginBottom: 10 }]}>
+                <TextInput
+                  style={[styles.modalInput, { color: colors.text }]}
+                  placeholder="Enter code"
+                  placeholderTextColor={colors.icon}
+                  value={secondaryCodeToSend}
+                  onChangeText={setSecondaryCodeToSend}
+                  secureTextEntry={!showEnteredSecondaryCode}
+                  autoCapitalize="none"
+                  editable={!isSending}
+                />
+                <TouchableOpacity onPress={() => setShowEnteredSecondaryCode(!showEnteredSecondaryCode)} style={styles.eyeIcon}>
+                  <Ionicons
+                    name={showEnteredSecondaryCode ? "eye-off-outline" : "eye-outline"}
+                    size={24}
+                    color={colors.icon}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={[styles.modalInputContainer, { borderColor: colors.border }]}>
+                <TextInput
+                  style={[styles.modalInput, { color: colors.text }]}
+                  placeholder="Confirm code"
+                  placeholderTextColor={colors.icon}
+                  value={confirmSecondaryCode}
+                  onChangeText={setConfirmSecondaryCode}
+                  secureTextEntry={!showEnteredSecondaryCode}
+                  autoCapitalize="none"
+                  editable={!isSending}
+                />
+              </View>
+
+              {sendSecondaryCodeError && (
+                <Text style={styles.modalErrorText}>{sendSecondaryCodeError}</Text>
+              )}
+
+              {isSending ? (
+                <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
+              ) : (
+                <View style={styles.modalButtonContainer}>
+                  <Pressable
+                    style={[styles.modalButton, { backgroundColor: 'gray' }]}
+                    onPress={() => setShowSendSecondaryModal(false)}
+                  >
+                    <Text style={styles.modalButtonText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: colors.tint },
+                      (!secondaryCodeToSend || !confirmSecondaryCode || secondaryCodeToSend !== confirmSecondaryCode) && styles.disabledButton
+                    ]}
+                    onPress={handleConfirmSendSecondary}
+                    disabled={!secondaryCodeToSend || !confirmSecondaryCode || secondaryCodeToSend !== confirmSecondaryCode}
+                  >
+                    <Text style={styles.modalButtonText}>Send Secure</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          </KeyboardAvoidingView>
         </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -641,6 +797,12 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'flex-end',
   },
+  secondaryAuthToggle: {
+    padding: 10,
+    marginRight: 5,
+    alignSelf: 'flex-end',
+    marginBottom: 5,
+  },
   input: {
     flex: 1,
     borderWidth: 1,
@@ -733,5 +895,8 @@ const styles = StyleSheet.create({
   modalSpinner: {
     marginTop: 15,
     marginBottom: 15,
+  },
+  disabledButton: {
+    opacity: 0.5,
   },
 });

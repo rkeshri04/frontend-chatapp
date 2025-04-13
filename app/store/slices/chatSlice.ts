@@ -7,9 +7,9 @@ const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
 interface Message {
   id: string;
+  sender_id: string | null; // Add sender_id field
   text: string; // Will hold translated_content or content
   originalText: string | null; // Will hold the original content
-  sender: string;
   timestamp: number;
   secondary_auth?: boolean; // Flag for secondary auth requirement
   is_verified?: boolean; // Track if secondary auth was successful for this message
@@ -48,11 +48,11 @@ const initialState: ChatState = {
   error: null,
 };
 
-// Helper function to get authorization headers
-const getAuthHeaders = async (state) => {
+// Helper function to get authorization headers and user ID
+const getAuthHeadersAndUserId = async (state) => {
   let token = state?.auth?.token;
-  // Assuming language is stored in auth.user.default_language
-  const language = state?.auth?.user?.default_language || 'en'; // Default to 'en' if not found
+  const userId = state?.auth?.user?.id; // Get user ID from auth state
+  const language = state?.auth?.user?.default_language || 'en';
 
   if (!token) {
     token = await SecureStore.getItemAsync('token');
@@ -65,8 +65,11 @@ const getAuthHeaders = async (state) => {
   const authToken = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
 
   return {
-    Authorization: authToken,
-    'X-User-Language': language, // Add language header
+    headers: {
+      Authorization: authToken,
+      'X-User-Language': language,
+    },
+    userId: userId, // Return userId along with headers
   };
 };
 
@@ -75,9 +78,9 @@ export const fetchConversations = createAsyncThunk(
   'chat/fetchConversations',
   async (_, { rejectWithValue, getState, dispatch }) => {
     try {
-      const headers = await getAuthHeaders(getState());
+      const headers = await getAuthHeadersAndUserId(getState());
 
-      const response = await axios.get(`${API_URL}/chat/conversations/`, { headers });
+      const response = await axios.get(`${API_URL}/chat/conversations/`, { headers: headers.headers });
 
       let conversations = [];
 
@@ -128,31 +131,66 @@ export const fetchConversations = createAsyncThunk(
 
 export const sendMessage = createAsyncThunk(
   'chat/sendMessage',
-  async ({ chatId, text }: { chatId: string, text: string }, { rejectWithValue, getState }) => {
+  async (
+    { chatId, text, secondaryAuth, secondaryCode }: { chatId: string, text: string, secondaryAuth?: boolean, secondaryCode?: string },
+    { rejectWithValue, getState }
+  ) => {
     try {
-      const headers = await getAuthHeaders(getState());
+      // Get headers and userId
+      const { headers, userId } = await getAuthHeadersAndUserId(getState());
+
+      if (!userId) {
+        return rejectWithValue('User ID not found. Cannot send message.');
+      }
+
+      const requestBody: {
+        conversation_id: string;
+        content: string;
+        secondary_auth?: boolean;
+        second_code?: string;
+      } = {
+        conversation_id: chatId,
+        content: text,
+      };
+
+      if (secondaryAuth && secondaryCode) {
+        requestBody.secondary_auth = true;
+        requestBody.second_code = secondaryCode;
+      }
 
       const response = await axios.post(
-        `${API_URL}/chat/conversations/${chatId}/messages`,
-        { content: text },
+        `${API_URL}/chat/messages/`,
+        requestBody,
         { headers }
       );
 
+      const newMessage: Message = {
+        id: response.data.id || Date.now().toString(),
+        sender_id: userId, // Set sender_id to the current user's ID
+        text: response.data.content || text,
+        originalText: response.data.content || text,
+        timestamp: response.data.created_at ? new Date(response.data.created_at).getTime() : Date.now(),
+        secondary_auth: response.data.secondary_auth === true,
+        is_verified: response.data.secondary_auth === true ? false : undefined,
+        verification_attempts: 0,
+      };
+
       return {
         chatId,
-        message: {
-          id: response.data.id || Date.now().toString(),
-          text,
-          sender: 'me',
-          timestamp: Date.now(),
-        }
+        message: newMessage,
       };
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        return rejectWithValue('Authentication failed. Your session may have expired.');
+      console.error('Send message error:', error.response?.data || error.message);
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 401) {
+          return rejectWithValue('Authentication failed. Your session may have expired.');
+        }
+        if (error.response?.data?.detail?.includes('secondary code')) {
+           return rejectWithValue(error.response.data.detail);
+        }
+        return rejectWithValue(error.response?.data?.detail || 'Failed to send message. Please try again.');
       }
-
-      return rejectWithValue('Failed to send message. Please try again.');
+      return rejectWithValue('Network error. Failed to send message.');
     }
   }
 );
@@ -194,7 +232,7 @@ export const createConversation = createAsyncThunk(
           {
             id: response.data.message_id || Date.now().toString(),
             text: initialMessage,
-            sender: 'me',
+            sender_id: null, // Initialize sender_id as null for the initial message
             timestamp: Date.now(),
           }
         ]
@@ -215,43 +253,43 @@ export const fetchChatMessages = createAsyncThunk(
   'chat/fetchChatMessages',
   async ({ chatId, code }: { chatId: string, code: string }, { rejectWithValue, getState }) => {
     try {
-      const baseHeaders = await getAuthHeaders(getState());
-      const headers = { ...baseHeaders, 'X-Convo-Code': code };
+      // Use the helper that also gets userId, although not strictly needed here for the request
+      const { headers } = await getAuthHeadersAndUserId(getState());
+      const requestHeaders = { ...headers, 'X-Convo-Code': code };
 
-      console.log(`Fetching messages for chat ${chatId} using code and language ${headers['X-User-Language']}`);
-      const response = await axios.get(`${API_URL}/chat/messages/conversation/${chatId}/with-code`, { headers });
+      console.log(`Fetching messages for chat ${chatId} using code and language ${requestHeaders['X-User-Language']}`);
+      const response = await axios.get(`${API_URL}/chat/messages/conversation/${chatId}/with-code`, { headers: requestHeaders });
       console.log('Messages fetch successful:', response.status);
 
       let messages: Message[] = [];
       if (Array.isArray(response.data)) {
         messages = response.data.map(msg => ({
           id: msg.id || String(Math.random()),
-          // Always prioritize translated_content if available, otherwise use content.
-          // For secondary_auth=true, this might initially show translated placeholder if available,
-          // or the encrypted content if not. fetchUnlockedMessage will overwrite later.
+          sender_id: msg.sender_id || null, // Store sender_id from backend
           text: msg.translated_content || msg.content || '',
-          originalText: msg.content || null, // Store original content (which might be encrypted for secondary_auth)
-          sender: msg.is_sender ? 'me' : 'other',
+          originalText: msg.content || null,
           timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
-          secondary_auth: msg.secondary_auth === true, // Store the flag
-          is_verified: false, // Initially not verified
-          verification_attempts: 0, // Initialize attempts
+          secondary_auth: msg.secondary_auth === true,
+          is_verified: false,
+          verification_attempts: 0,
         })).sort((a, b) => a.timestamp - b.timestamp);
       } else {
         console.warn('Unexpected response structure for messages:', response.data);
       }
 
-      // Return code along with messages to store it in state
       return { chatId, messages, code };
-    } catch (error) {
-      console.error('Error fetching messages:', error);
+    } catch (error: any) {
+      console.error('Error fetching messages:', error.response?.data || error.message);
 
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
           return rejectWithValue('Authentication failed. Your session may have expired.');
         }
         if (error.response?.status === 403 || error.response?.status === 404) {
-          return rejectWithValue('Failed to load messages. Invalid code or conversation not found.');
+          if (error.response?.data?.detail?.toLowerCase().includes('invalid code')) {
+             return rejectWithValue('Invalid conversation code.');
+          }
+          return rejectWithValue('Failed to load messages. Conversation not found or access denied.');
         }
         return rejectWithValue(error.response?.data?.detail || 'Failed to load messages. Please try again.');
       }
@@ -266,7 +304,7 @@ export const verifyConversationCode = createAsyncThunk(
   'chat/verifyConversationCode',
   async ({ chatId, code }: { chatId: string, code: string }, { rejectWithValue, getState }) => {
     try {
-      const headers = await getAuthHeaders(getState());
+      const { headers } = await getAuthHeadersAndUserId(getState());
 
       const response = await axios.post(
         `${API_URL}/chat/conversations/${chatId}/verify-code`,
@@ -308,15 +346,15 @@ export const verifySecondaryCode = createAsyncThunk(
     { rejectWithValue, getState }
   ) => {
     try {
-      const baseHeaders = await getAuthHeaders(getState());
+      const { headers } = await getAuthHeadersAndUserId(getState());
 
       if (!primaryCode) {
         console.error('Primary code was not provided to verifySecondaryCode thunk.');
         return rejectWithValue('Primary conversation code not found. Cannot verify secondary code.');
       }
 
-      const headers = {
-        ...baseHeaders,
+      const requestHeaders = {
+        ...headers,
         'X-Convo-Code': primaryCode,
         'X-Second-Code': secondaryCode
       };
@@ -326,14 +364,12 @@ export const verifySecondaryCode = createAsyncThunk(
       const response = await axios.post(
         `${API_URL}/chat/conversations/${chatId}/messages/${messageId}/verify-secondary-code`,
         {},
-        { headers }
+        { headers: requestHeaders }
       );
 
       console.log('Secondary verification response:', response.status, response.data);
 
-      // Only check for validity confirmation
       if (response.data && response.data.valid === true) {
-        // Return necessary info to trigger content fetch
         return { chatId, messageId, primaryCode, secondaryCode }; 
       } else {
         return rejectWithValue('Invalid secondary code');
@@ -362,41 +398,35 @@ export const fetchUnlockedMessage = createAsyncThunk(
     { rejectWithValue, getState }
   ) => {
     try {
-      const baseHeaders = await getAuthHeaders(getState()); // Use updated getAuthHeaders
+      const { headers } = await getAuthHeadersAndUserId(getState());
 
-      const headers = {
-        ...baseHeaders,
+      const requestHeaders = {
+        ...headers,
         'X-Convo-Code': primaryCode,
         'X-Second-Code': secondaryCode
       };
-      // No need for X-User-Language here as we expect raw decrypted content + potentially its translation
 
       console.log(`Fetching unlocked content for message ${messageId} in chat ${chatId}`);
 
-      // Make GET request to the unlock endpoint
       const response = await axios.get(
         `${API_URL}/chat/messages/conversation/${chatId}/${messageId}/unlock-secondary`,
-        { headers }
+        { headers: requestHeaders }
       );
 
       console.log('Unlock message response:', response.status, response.data);
 
-      // Expecting { content: "decrypted original", translated_content: "translation" | null, ... }
       if (response.data && typeof response.data.content === 'string') {
-        // Return both the original decrypted content and the translated content (if available)
         return {
           chatId,
           messageId,
           decryptedContent: response.data.content,
-          translatedContent: response.data.translated_content || null // Ensure it's null if missing
+          translatedContent: response.data.translated_content || null
         };
       } else {
-        // If content is missing or not a string
         console.error('Unexpected response structure from unlock endpoint:', response.data);
         return rejectWithValue('Failed to retrieve unlocked message content.');
       }
     } catch (error) {
-      // ... existing error handling ...
       console.error('Error fetching unlocked message:', error);
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
@@ -476,13 +506,16 @@ const chatSlice = createSlice({
         const chat = state.chats.find(c => c.id === chatId);
 
         if (chat) {
-          chat.messages.push(message);
+          if (!chat.messages.some(m => m.id === message.id)) {
+            chat.messages.push(message);
+          }
           chat.lastMessage = message.text;
         }
       })
       .addCase(sendMessage.rejected, (state, action) => {
         state.isLoading = false;
         state.error = action.payload as string;
+        Alert.alert("Send Error", action.payload as string || "Failed to send message.");
       })
       .addCase(createConversation.pending, (state) => {
         state.isLoading = true;
@@ -550,10 +583,10 @@ const chatSlice = createSlice({
         if (chat) {
           const message = chat.messages.find(m => m.id === messageId);
           if (message) {
-            message.text = translatedContent || decryptedContent; // Update text with translated or decrypted content
-            message.originalText = decryptedContent; // Store decrypted content as original
-            message.is_verified = true; // Ensure it's marked as verified
-            message.verification_attempts = 0; // Reset attempts on success
+            message.text = translatedContent || decryptedContent;
+            message.originalText = decryptedContent;
+            message.is_verified = true;
+            message.verification_attempts = 0;
             console.log(`Message ${messageId} unlocked and content updated.`);
           }
         }
