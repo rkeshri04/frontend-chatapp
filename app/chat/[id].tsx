@@ -303,29 +303,32 @@ export default function ChatScreen() {
     return (
       <View style={[
         styles.messageBubble,
-        isMe ? styles.myMessage : [styles.otherMessage, { backgroundColor: colorScheme === 'dark' ? '#333' : '#E5E5EA' }]
+        isMe ? styles.myMessage : [styles.otherMessage, { backgroundColor: colorScheme === 'dark' ? '#333' : '#E5E5EA' }],
+        item.secondary_auth && isCurrentlyUnlocked && styles.unlockedMessageContainer
       ]}>
         {item.secondary_auth && isCurrentlyUnlocked && (
           <TouchableOpacity onPress={() => handleManualLock(item.id)} style={styles.lockIconWrapper}>
             <Ionicons
               name="lock-open-outline"
-              size={16}
-              color={isMe ? 'rgba(255, 255, 255, 0.7)' : colors.icon}
+              size={18}
+              color={isMe ? 'rgba(255, 255, 255, 0.8)' : colors.icon}
             />
           </TouchableOpacity>
         )}
-        <Text style={[
-          styles.messageText,
-          isMe ? styles.myMessageText : [styles.otherMessageText, { color: colors.text }]
-        ]}>
-          {item.text}
-        </Text>
-        <Text style={[
-          styles.messageTime,
-          !isMe && { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' }
-        ]}>
-          {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </Text>
+        <View style={styles.messageContentWrapper}>
+          <Text style={[
+            styles.messageText,
+            isMe ? styles.myMessageText : [styles.otherMessageText, { color: colors.text }]
+          ]}>
+            {item.text}
+          </Text>
+          <Text style={[
+            styles.messageTime,
+            !isMe && { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' }
+          ]}>
+            {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
       </View>
     );
   };
@@ -513,19 +516,24 @@ const styles = StyleSheet.create({
   messagesContainer: {
     padding: 15,
     flexGrow: 1,
+    marginBottom: 10, // Add some space above the input container
   },
   messageBubble: {
     maxWidth: '80%',
     padding: 12,
     borderRadius: 18,
     marginBottom: 10,
+    flexDirection: 'row', // Keep as row for potential icon alignment
+    alignItems: 'flex-end', // Align items like timestamp to the bottom
+    // Let the bubble determine its own width based on content + alignSelf
   },
   myMessage: {
-    alignSelf: 'flex-end',
+    alignSelf: 'flex-end', // Position the bubble to the right
     backgroundColor: '#0a7ea4',
   },
   otherMessage: {
-    alignSelf: 'flex-start',
+    alignSelf: 'flex-start', // Position the bubble to the left
+    // backgroundColor is handled by theme/dark mode logic in renderMessage
   },
   messageText: {
     fontSize: 16,
@@ -541,6 +549,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
     color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'right',
+    alignSelf: 'flex-end',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -567,6 +576,7 @@ const styles = StyleSheet.create({
   },
   secondaryAuthContainer: {
     alignItems: 'flex-start',
+    flexDirection: 'column',
   },
   secondaryAuthText: {
     fontSize: 15,
@@ -663,9 +673,15 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   lockIconWrapper: {
-    position: 'absolute',
-    top: 5,
-    right: 5,
-    padding: 3,
+    padding: 5,
+    marginRight: 8,
+    alignSelf: 'center',
+  },
+  unlockedMessageContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  messageContentWrapper: {
+    flexDirection: 'column',
   },
 });
