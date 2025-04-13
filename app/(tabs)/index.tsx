@@ -35,6 +35,7 @@ export default function TabOneScreen() {
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
   const [verifyCodeError, setVerifyCodeError] = useState<string | null>(null);
   const [showVerifyCode, setShowVerifyCode] = useState(false);
+  const [verifyAttempts, setVerifyAttempts] = useState(0);
 
   const [approveModalVisible, setApproveModalVisible] = useState(false);
   const [selectedChatIdForApprove, setSelectedChatIdForApprove] = useState<string | null>(null);
@@ -85,6 +86,7 @@ export default function TabOneScreen() {
     setVerifyCodeError(null);
     setIsVerifyingCode(false);
     setShowVerifyCode(false);
+    setVerifyAttempts(0);
     setVerifyModalVisible(true);
   };
 
@@ -107,19 +109,35 @@ export default function TabOneScreen() {
         dispatch(setCurrentChat(chatId));
         await dispatch(fetchChatMessages({ chatId, code: verifiedCode })).unwrap();
 
+        setVerifyAttempts(0);
         setVerifyModalVisible(false);
         router.push({
           pathname: `../chat/${chatId}`,
           params: { primaryCode: verifiedCode }
         });
       } else {
+        const newAttempts = verifyAttempts + 1;
+        setVerifyAttempts(newAttempts);
+
         let errorMessage = 'Verification failed. Please try again.';
         if (resultAction.payload === 'Invalid code') {
-          errorMessage = 'Invalid code. Please check and try again.';
+          errorMessage = `Invalid code. Please check and try again. Attempt ${newAttempts} of 3.`;
         } else if (typeof resultAction.payload === 'string') {
           errorMessage = resultAction.payload;
         }
         setVerifyCodeError(errorMessage);
+
+        if (newAttempts >= 3 && resultAction.payload === 'Invalid code') {
+          Alert.alert(
+            "Too Many Failed Attempts",
+            "You have entered the wrong code too many times. You will be logged out for security.",
+            [{ text: "OK", onPress: async () => {
+                setVerifyModalVisible(false);
+                await dispatch(logout()).unwrap();
+                router.replace('../(auth)');
+            }}]
+          );
+        }
       }
     } catch (err: any) {
       setVerifyCodeError('An error occurred. Please check your connection and try again.');
@@ -131,6 +149,7 @@ export default function TabOneScreen() {
   const closeVerifyModal = () => {
     setVerifyModalVisible(false);
     setSelectedChatIdForVerify(null);
+    setVerifyAttempts(0);
   };
 
   const openApproveModal = (chatId: string) => {
@@ -391,7 +410,11 @@ export default function TabOneScreen() {
                     <Text style={styles.modalButtonText}>Cancel</Text>
                   </Pressable>
                   <Pressable
-                    style={[styles.modalButton, { backgroundColor: colors.tint }]}
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: colors.tint },
+                      !enteredVerifyCode.trim() && styles.disabledButton
+                    ]}
                     onPress={handleVerifyPrimaryCode}
                     disabled={!enteredVerifyCode.trim()}
                   >

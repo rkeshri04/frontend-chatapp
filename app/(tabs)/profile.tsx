@@ -118,8 +118,13 @@ export default function ProfileScreen() {
     Alert.alert('Test Session Expiry', 'Session set to expire in 35 seconds. Warning should appear in 5 seconds.');
   };
 
+  const appVersion = Constants.expoConfig?.version || '1.0.0'; // Get app version
+
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView 
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.scrollContentContainer} // Added for content padding
+    >
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={[styles.avatarContainer, { backgroundColor: colors.tint }]}>
           <Text style={styles.avatarText}>
@@ -170,7 +175,7 @@ export default function ProfileScreen() {
       </View>
 
       <View style={[styles.section]}>
-        <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleMenuPress}>
+        {/* <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleMenuPress}>
           <Ionicons name="person-outline" size={24} color={colors.tint} />
           <Text style={[styles.menuText, { color: colors.text }]}>Edit Profile</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.icon} />
@@ -180,7 +185,7 @@ export default function ProfileScreen() {
           <Ionicons name="notifications-outline" size={24} color={colors.tint} />
           <Text style={[styles.menuText, { color: colors.text }]}>Notifications</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.icon} />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
         
         <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleMenuPress}>
           <Ionicons name="lock-closed-outline" size={24} color={colors.tint} />
@@ -226,6 +231,11 @@ export default function ProfileScreen() {
         <Ionicons name="log-out-outline" size={24} color="#FF3B30" />
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
+
+      {/* Version Text */}
+      <Text style={[styles.versionText, { color: colors.icon }]}>
+        ChatApp v{appVersion}
+      </Text>
     </ScrollView>
   );
 }
@@ -233,6 +243,9 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  scrollContentContainer: { // Added style for ScrollView content
+    paddingBottom: 20, // Add padding at the bottom
   },
   header: {
     alignItems: 'center',
@@ -298,5 +311,10 @@ const styles = StyleSheet.create({
     marginLeft: 15,
     fontSize: 16,
     fontWeight: '500',
+  },
+  versionText: { // Added style for version text
+    textAlign: 'center',
+    marginTop: 20, // Space above the version text
+    fontSize: 12,
   },
 });

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { Modal, View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useAppDispatch, useAppSelector } from '../app/store/hooks';
 import { searchUsers, clearSearchResults } from '../app/store/slices/searchSlice';
-import { requestConversation } from '../app/store/slices/chatSlice'; // Import the new thunk
+import { requestConversation, verifyConversationCode, setCurrentChat, fetchChatMessages } from '../app/store/slices/chatSlice';
+import { logout } from '../app/store/slices/authSlice';
 import { useAppTheme } from '../app/hooks/useAppTheme';
-import { Ionicons } from '@expo/vector-icons'; // Import Ionicons
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 interface SearchUserOverlayProps {
   visible: boolean;
@@ -24,19 +26,27 @@ const SearchUserOverlay: React.FC<SearchUserOverlayProps> = ({ visible, onClose 
   const dispatch = useAppDispatch();
   const { results, isLoading, error } = useAppSelector(state => state.search);
   const { colors, colorScheme } = useAppTheme();
-  const loggedInUserId = useAppSelector(state => state.auth.user?.id); // Get logged-in user ID
+  const loggedInUserId = useAppSelector(state => state.auth.user?.id);
+  const router = useRouter();
 
-  // State to track users for whom a request has been sent in this session
   const [requestedUserIds, setRequestedUserIds] = useState<Set<string>>(new Set());
-  const [requestingId, setRequestingId] = useState<string | null>(null); // Track which user request is in progress
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+
+  const [verifyModalVisible, setVerifyModalVisible] = useState(false);
+  const [selectedUserForVerify, setSelectedUserForVerify] = useState<UserSearchResult | null>(null);
+  const [enteredVerifyCode, setEnteredVerifyCode] = useState('');
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [verifyCodeError, setVerifyCodeError] = useState<string | null>(null);
+  const [showVerifyCode, setShowVerifyCode] = useState(false);
+  const [verifyAttempts, setVerifyAttempts] = useState(0);
 
   useEffect(() => {
-    // Clear search results and requested IDs when the overlay is closed
     if (!visible) {
       dispatch(clearSearchResults());
       setSearchTerm('');
       setRequestedUserIds(new Set());
       setRequestingId(null);
+      closeVerifyModalInOverlay();
     }
   }, [visible, dispatch]);
 
@@ -50,7 +60,7 @@ const SearchUserOverlay: React.FC<SearchUserOverlayProps> = ({ visible, onClose 
   };
 
   const handleStartConversation = async (user: UserSearchResult) => {
-    if (requestingId === user.id) return; // Prevent multiple requests
+    if (requestingId === user.id) return;
 
     Alert.alert(
       "Start Conversation",
@@ -60,18 +70,15 @@ const SearchUserOverlay: React.FC<SearchUserOverlayProps> = ({ visible, onClose 
         {
           text: "Yes",
           onPress: async () => {
-            setRequestingId(user.id); // Set loading state for this specific user
+            setRequestingId(user.id);
             try {
-              console.log(`Attempting to start conversation with user ID: ${user.id}`);
               await dispatch(requestConversation({ user2_id: user.id })).unwrap();
-              // On success, add user ID to the set to hide the '+' icon
               setRequestedUserIds(prev => new Set(prev).add(user.id));
               Alert.alert("Success", `Conversation request sent to ${user.username}.`);
             } catch (err: any) {
-              console.error("Failed to send conversation request:", err);
               Alert.alert("Error", `Failed to send request: ${err || 'Unknown error'}`);
             } finally {
-              setRequestingId(null); // Clear loading state regardless of outcome
+              setRequestingId(null);
             }
           },
         },
@@ -79,49 +86,149 @@ const SearchUserOverlay: React.FC<SearchUserOverlayProps> = ({ visible, onClose 
     );
   };
 
+  const handleOpenVerifyModal = (user: UserSearchResult) => {
+    if (!user.conversation_id) {
+      Alert.alert("Error", "Conversation ID is missing.");
+      return;
+    }
+    setSelectedUserForVerify(user);
+    setEnteredVerifyCode('');
+    setVerifyCodeError(null);
+    setIsVerifyingCode(false);
+    setShowVerifyCode(false);
+    setVerifyAttempts(0);
+    setVerifyModalVisible(true);
+  };
+
+  const closeVerifyModalInOverlay = () => {
+    setVerifyModalVisible(false);
+    setSelectedUserForVerify(null);
+    setVerifyAttempts(0);
+  };
+
+  const handleVerifyCodeInOverlay = async () => {
+    if (!selectedUserForVerify || !selectedUserForVerify.conversation_id || !enteredVerifyCode.trim()) {
+      setVerifyCodeError('Please enter the code.');
+      return;
+    }
+
+    const chatId = selectedUserForVerify.conversation_id;
+    const code = enteredVerifyCode.trim();
+
+    setIsVerifyingCode(true);
+    setVerifyCodeError(null);
+
+    try {
+      const resultAction = await dispatch(verifyConversationCode({ chatId, code }));
+
+      if (verifyConversationCode.fulfilled.match(resultAction)) {
+        setVerifyAttempts(0);
+        const verifiedCode = code;
+
+        dispatch(setCurrentChat(chatId));
+        await dispatch(fetchChatMessages({ chatId, code: verifiedCode })).unwrap();
+
+        closeVerifyModalInOverlay();
+        onClose();
+        router.push({
+          pathname: `../chat/${chatId}`,
+          params: { primaryCode: verifiedCode }
+        });
+      } else {
+        const newAttempts = verifyAttempts + 1;
+        setVerifyAttempts(newAttempts);
+
+        let errorMessage = 'Verification failed. Please try again.';
+        if (resultAction.payload === 'Invalid code') {
+          errorMessage = `Invalid code. Attempt ${newAttempts} of 3.`;
+        } else if (typeof resultAction.payload === 'string') {
+          errorMessage = resultAction.payload;
+        }
+        setVerifyCodeError(errorMessage);
+
+        if (newAttempts >= 3 && resultAction.payload === 'Invalid code') {
+          closeVerifyModalInOverlay();
+          onClose();
+
+          Alert.alert(
+            "Too Many Failed Attempts",
+            "You have entered the wrong code too many times. You will be logged out.",
+            [{ text: "OK", onPress: async () => {
+                try {
+                  await dispatch(logout()).unwrap();
+                  setTimeout(() => {
+                    router.replace('../(auth)');
+                  }, 10);
+                } catch (logoutError) {
+                   console.error("Logout failed after failed attempts:", logoutError);
+                }
+            }}]
+          );
+          setIsVerifyingCode(false);
+          return;
+        }
+      }
+    } catch (err: any) {
+      setVerifyCodeError('An error occurred. Please check connection.');
+    } finally {
+      if (verifyAttempts < 3 || (verifyAttempts >= 3 && verifyCodeError !== 'Invalid code')) {
+        setIsVerifyingCode(false);
+      }
+    }
+  };
+
   const renderItem = ({ item }: { item: UserSearchResult }) => {
-    // Don't show the logged-in user in search results
     if (item.id === loggedInUserId) {
       return null;
     }
 
     const showAddButton = !item.conversation_exists && !requestedUserIds.has(item.id);
+    const isRequestSent = requestedUserIds.has(item.id) && !item.conversation_exists;
+    const canInteract = item.conversation_exists || showAddButton;
+
     const avatarLetter = item.username?.[0]?.toUpperCase() || item.email?.[0]?.toUpperCase() || '?';
 
     return (
-      <View style={[styles.itemContainer, { borderBottomColor: colors.border }]}>
-        {/* Avatar */}
+      <TouchableOpacity
+        onPress={() => {
+          if (item.conversation_exists) {
+            handleOpenVerifyModal(item);
+          } else if (showAddButton) {
+            handleStartConversation(item);
+          }
+        }}
+        disabled={!canInteract}
+        style={[
+            styles.itemContainer,
+            { borderBottomColor: colors.border },
+            !canInteract && styles.disabledItem
+        ]}
+      >
         <View style={[styles.avatarContainer, { backgroundColor: colors.tint }]}>
           <Text style={styles.avatarText}>{avatarLetter}</Text>
         </View>
 
-        {/* User Info */}
         <View style={styles.userInfo}>
           <Text style={[styles.username, { color: colors.text }]}>{item.username}</Text>
           <Text style={[styles.email, { color: colors.icon }]}>{item.email}</Text>
         </View>
 
-        {/* Action Button/Icon */}
         {showAddButton && (
-          <TouchableOpacity
-            onPress={() => handleStartConversation(item)}
-            disabled={requestingId === item.id}
-            style={styles.addButton}
-          >
+          <View style={styles.addButton}>
             {requestingId === item.id ? (
               <ActivityIndicator size="small" color={colors.tint} />
             ) : (
               <Ionicons name="add-circle-outline" size={28} color={colors.tint} />
             )}
-          </TouchableOpacity>
+          </View>
         )}
         {item.conversation_exists && (
-           <Ionicons name="checkmark-circle" size={24} color="green" style={styles.existingIcon} />
+           <Ionicons name="chatbubble-ellipses-outline" size={24} color={colors.tint} style={styles.existingIcon} />
         )}
-         {requestedUserIds.has(item.id) && !item.conversation_exists && (
+         {isRequestSent && (
            <Ionicons name="checkmark-done-circle-outline" size={24} color={colors.icon} style={styles.existingIcon} title="Request Sent"/>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -177,6 +284,74 @@ const SearchUserOverlay: React.FC<SearchUserOverlayProps> = ({ visible, onClose 
               ) : null
             }
           />
+
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={verifyModalVisible}
+            onRequestClose={closeVerifyModalInOverlay}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={styles.innerModalCenteredView}
+            >
+              <View style={[styles.modalView, { backgroundColor: colors.card }]}>
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Enter Code for {selectedUserForVerify?.username}</Text>
+                <Text style={[styles.modalSubtitle, { color: colors.icon }]}>
+                  Enter the code to access this conversation.
+                </Text>
+
+                <View style={[styles.inputContainer, { borderColor: colors.border }]}>
+                  <TextInput
+                    style={[styles.modalInput, { color: colors.text }]}
+                    placeholder="Enter code..."
+                    placeholderTextColor={colors.icon}
+                    value={enteredVerifyCode}
+                    onChangeText={setEnteredVerifyCode}
+                    secureTextEntry={!showVerifyCode}
+                    autoCapitalize="none"
+                    editable={!isVerifyingCode}
+                  />
+                  <TouchableOpacity onPress={() => setShowVerifyCode(!showVerifyCode)} style={styles.eyeIcon}>
+                    <Ionicons
+                      name={showVerifyCode ? "eye-off-outline" : "eye-outline"}
+                      size={24}
+                      color={colors.icon}
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {verifyCodeError && (
+                  <Text style={styles.modalErrorText}>{verifyCodeError}</Text>
+                )}
+
+                {isVerifyingCode ? (
+                  <ActivityIndicator size="large" color={colors.tint} style={styles.modalSpinner} />
+                ) : (
+                  <View style={styles.modalButtonContainer}>
+                    <Pressable
+                      style={[styles.modalButton, { backgroundColor: 'gray' }]}
+                      onPress={closeVerifyModalInOverlay}
+                    >
+                      <Text style={styles.modalButtonText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                          styles.modalButton,
+                          { backgroundColor: colors.tint },
+                          !enteredVerifyCode.trim() && styles.disabledButton
+                      ]}
+                      onPress={handleVerifyCodeInOverlay}
+                      disabled={!enteredVerifyCode.trim()}
+                    >
+                      <Text style={styles.modalButtonText}>Verify</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+
         </View>
       </View>
     </Modal>
@@ -186,15 +361,15 @@ const SearchUserOverlay: React.FC<SearchUserOverlayProps> = ({ visible, onClose 
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    justifyContent: 'flex-end', // Position modal at the bottom initially
+    justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
-    height: '85%', // Take up most of the screen
+    height: '85%',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 20,
-    paddingTop: 15, // Less padding at the very top
+    paddingTop: 15,
   },
   header: {
     flexDirection: 'row',
@@ -215,7 +390,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   list: {
-    flex: 1, // Ensure list takes available space
+    flex: 1,
   },
   itemContainer: {
     flexDirection: 'row',
@@ -223,22 +398,25 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  avatarContainer: { // Style for the avatar
+  disabledItem: {
+    opacity: 0.5,
+  },
+  avatarContainer: {
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12, // Space between avatar and user info
+    marginRight: 12,
   },
-  avatarText: { // Style for the letter inside the avatar
+  avatarText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
   },
   userInfo: {
-    flex: 1, // Allow user info to take up space
-    marginRight: 10, // Add margin before the button/icon
+    flex: 1,
+    marginRight: 10,
   },
   username: {
     fontSize: 16,
@@ -249,11 +427,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   addButton: {
-    padding: 5, // Add padding for easier tapping
-    marginLeft: 10, // Space between text and button
+    padding: 5,
+    marginLeft: 10,
   },
   existingIcon: {
-     marginLeft: 10, // Space between text and icon
+     marginLeft: 10,
   },
   loader: {
     marginTop: 20,
@@ -267,6 +445,85 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
     fontSize: 16,
+  },
+  innerModalCenteredView: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  modalView: {
+    margin: 20,
+    borderRadius: 20,
+    padding: 35,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    width: '85%',
+  },
+  modalTitle: {
+    marginBottom: 8,
+    textAlign: "center",
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    marginBottom: 15,
+    textAlign: "center",
+    fontSize: 14,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 15,
+    width: '100%',
+  },
+  modalInput: {
+    flex: 1,
+    height: 45,
+    paddingHorizontal: 15,
+    fontSize: 16,
+  },
+  eyeIcon: {
+    padding: 10,
+  },
+  modalErrorText: {
+    color: 'red',
+    marginBottom: 15,
+    textAlign: 'center',
+    fontSize: 14,
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 10,
+  },
+  modalButton: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    elevation: 2,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    textAlign: "center",
+    fontSize: 16,
+  },
+  modalSpinner: {
+    marginTop: 15,
+    marginBottom: 15,
+  },
+  disabledButton: {
+    opacity: 0.5,
   },
 });
 
