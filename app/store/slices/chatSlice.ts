@@ -7,7 +7,8 @@ const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
 interface Message {
   id: string;
-  text: string; // Will hold encrypted content if secondary_auth is true initially
+  text: string; // Will hold translated_content or content
+  originalText: string | null; // Will hold the original content
   sender: string;
   timestamp: number;
   secondary_auth?: boolean; // Flag for secondary auth requirement
@@ -50,6 +51,8 @@ const initialState: ChatState = {
 // Helper function to get authorization headers
 const getAuthHeaders = async (state) => {
   let token = state?.auth?.token;
+  // Assuming language is stored in auth.user.default_language
+  const language = state?.auth?.user?.default_language || 'en'; // Default to 'en' if not found
 
   if (!token) {
     token = await SecureStore.getItemAsync('token');
@@ -62,7 +65,8 @@ const getAuthHeaders = async (state) => {
   const authToken = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
 
   return {
-    Authorization: authToken
+    Authorization: authToken,
+    'X-User-Language': language, // Add language header
   };
 };
 
@@ -214,7 +218,7 @@ export const fetchChatMessages = createAsyncThunk(
       const baseHeaders = await getAuthHeaders(getState());
       const headers = { ...baseHeaders, 'X-Convo-Code': code };
 
-      console.log(`Fetching messages for chat ${chatId} using code`);
+      console.log(`Fetching messages for chat ${chatId} using code and language ${headers['X-User-Language']}`);
       const response = await axios.get(`${API_URL}/chat/messages/conversation/${chatId}/with-code`, { headers });
       console.log('Messages fetch successful:', response.status);
 
@@ -222,7 +226,11 @@ export const fetchChatMessages = createAsyncThunk(
       if (Array.isArray(response.data)) {
         messages = response.data.map(msg => ({
           id: msg.id || String(Math.random()),
-          text: msg.content || '', // Store content (might be encrypted)
+          // Always prioritize translated_content if available, otherwise use content.
+          // For secondary_auth=true, this might initially show translated placeholder if available,
+          // or the encrypted content if not. fetchUnlockedMessage will overwrite later.
+          text: msg.translated_content || msg.content || '',
+          originalText: msg.content || null, // Store original content (which might be encrypted for secondary_auth)
           sender: msg.is_sender ? 'me' : 'other',
           timestamp: msg.created_at ? new Date(msg.created_at).getTime() : Date.now(),
           secondary_auth: msg.secondary_auth === true, // Store the flag
@@ -354,13 +362,14 @@ export const fetchUnlockedMessage = createAsyncThunk(
     { rejectWithValue, getState }
   ) => {
     try {
-      const baseHeaders = await getAuthHeaders(getState());
+      const baseHeaders = await getAuthHeaders(getState()); // Use updated getAuthHeaders
 
       const headers = {
         ...baseHeaders,
         'X-Convo-Code': primaryCode,
         'X-Second-Code': secondaryCode
       };
+      // No need for X-User-Language here as we expect raw decrypted content + potentially its translation
 
       console.log(`Fetching unlocked content for message ${messageId} in chat ${chatId}`);
 
@@ -372,21 +381,27 @@ export const fetchUnlockedMessage = createAsyncThunk(
 
       console.log('Unlock message response:', response.status, response.data);
 
-      // Expecting { content: "decrypted message" }
+      // Expecting { content: "decrypted original", translated_content: "translation" | null, ... }
       if (response.data && typeof response.data.content === 'string') {
-        return { chatId, messageId, decryptedContent: response.data.content };
+        // Return both the original decrypted content and the translated content (if available)
+        return {
+          chatId,
+          messageId,
+          decryptedContent: response.data.content,
+          translatedContent: response.data.translated_content || null // Ensure it's null if missing
+        };
       } else {
         // If content is missing or not a string
         console.error('Unexpected response structure from unlock endpoint:', response.data);
         return rejectWithValue('Failed to retrieve unlocked message content.');
       }
     } catch (error) {
+      // ... existing error handling ...
       console.error('Error fetching unlocked message:', error);
       if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
           return rejectWithValue('Authentication failed.');
         }
-        // 403/404 likely mean codes were wrong or message not found
         if (error.response?.status === 403 || error.response?.status === 404) {
            return rejectWithValue('Failed to unlock message. Invalid codes or message not found.');
         }
@@ -530,12 +545,15 @@ const chatSlice = createSlice({
         console.log(`Unlocking message ${action.meta.arg.messageId}...`);
       })
       .addCase(fetchUnlockedMessage.fulfilled, (state, action) => {
-        const { chatId, messageId, decryptedContent } = action.payload;
+        const { chatId, messageId, decryptedContent, translatedContent } = action.payload;
         const chat = state.chats.find(c => c.id === chatId);
         if (chat) {
           const message = chat.messages.find(m => m.id === messageId);
           if (message) {
-            message.text = decryptedContent;
+            message.text = translatedContent || decryptedContent; // Update text with translated or decrypted content
+            message.originalText = decryptedContent; // Store decrypted content as original
+            message.is_verified = true; // Ensure it's marked as verified
+            message.verification_attempts = 0; // Reset attempts on success
             console.log(`Message ${messageId} unlocked and content updated.`);
           }
         }

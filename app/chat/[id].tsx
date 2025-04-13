@@ -8,7 +8,8 @@ import { useAppTheme } from '../hooks/useAppTheme';
 
 interface Message {
   id: string;
-  text: string;
+  text: string; // Main text (translated or original)
+  originalText: string | null; // Original text from backend
   sender: string;
   timestamp: string | number | Date;
   secondary_auth?: boolean;
@@ -18,6 +19,10 @@ interface Message {
 
 type UnlockedTimestamps = {
   [messageId: string]: number;
+};
+
+type ExpandedMessages = {
+  [messageId: string]: boolean;
 };
 
 const AUTO_RELOCK_DURATION = 60 * 1000;
@@ -54,6 +59,7 @@ export default function ChatScreen() {
   const [secondaryVerificationError, setSecondaryVerificationError] = useState<string | null>(null);
   const [showSecondaryCode, setShowSecondaryCode] = useState(false);
   const [unlockedTimestamps, setUnlockedTimestamps] = useState<UnlockedTimestamps>({});
+  const [expandedMessages, setExpandedMessages] = useState<ExpandedMessages>({});
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentAttempts = getMessageById(selectedMessageId)?.verification_attempts || 0;
@@ -233,6 +239,13 @@ export default function ChatScreen() {
     Alert.alert("SOS", "SOS functionality not yet implemented.");
   };
 
+  const toggleOriginalText = (messageId: string) => {
+    setExpandedMessages(prev => ({
+      ...prev,
+      [messageId]: !prev[messageId]
+    }));
+  };
+
   if (isLoading && !chat) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
@@ -266,6 +279,8 @@ export default function ChatScreen() {
   const renderMessage = ({ item }: { item: Message }) => {
     const isMe = item.sender === 'me';
     const isCurrentlyUnlocked = item.is_verified && unlockedTimestamps[item.id] && (Date.now() - unlockedTimestamps[item.id] < AUTO_RELOCK_DURATION);
+    const canShowOriginal = item.originalText && item.originalText !== item.text;
+    const isOriginalExpanded = expandedMessages[item.id] === true;
 
     if (item.secondary_auth && !isCurrentlyUnlocked) {
       const timedOut = item.is_verified && !isCurrentlyUnlocked;
@@ -274,25 +289,26 @@ export default function ChatScreen() {
         <View style={[
           styles.messageBubble,
           isMe ? styles.myMessage : [styles.otherMessage, { backgroundColor: colorScheme === 'dark' ? '#333' : '#E5E5EA' }],
-          styles.secondaryAuthContainer
         ]}>
-          <Ionicons name="lock-closed-outline" size={18} color={isMe ? 'rgba(255, 255, 255, 0.7)' : colors.icon} style={{ marginRight: 5 }} />
-          <Text style={[
-            styles.secondaryAuthText,
-            isMe ? { color: 'rgba(255, 255, 255, 0.9)' } : { color: colors.text }
-          ]}>
-            {timedOut ? "Message relocked (timed out)" : "Secondary code required."}
-          </Text>
-          <TouchableOpacity
-            style={[styles.verifyButton, { borderColor: isMe ? 'rgba(255, 255, 255, 0.7)' : colors.tint }]}
-            onPress={() => openSecondaryVerifyModal(item.id)}
-          >
-            <Text style={[styles.verifyButtonText, { color: isMe ? '#fff' : colors.tint }]}>Verify</Text>
-          </TouchableOpacity>
+          <View style={styles.secondaryAuthRow}>
+            <Ionicons name="lock-closed-outline" size={18} color={isMe ? 'rgba(255, 255, 255, 0.7)' : colors.icon} style={styles.secondaryAuthIcon} />
+            <Text style={[
+              styles.secondaryAuthText,
+              isMe ? { color: 'rgba(255, 255, 255, 0.9)' } : { color: colors.text }
+            ]} numberOfLines={1} ellipsizeMode='tail'>
+              {timedOut ? "Relocked" : "Code Required"}
+            </Text>
+            <TouchableOpacity
+              style={[styles.verifyButton, { borderColor: isMe ? 'rgba(255, 255, 255, 0.7)' : colors.tint }]}
+              onPress={() => openSecondaryVerifyModal(item.id)}
+            >
+              <Text style={[styles.verifyButtonText, { color: isMe ? '#fff' : colors.tint }]}>Verify</Text>
+            </TouchableOpacity>
+          </View>
           <Text style={[
             styles.messageTime,
             !isMe && { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' },
-            { marginTop: 8 }
+            { marginTop: 4 }
           ]}>
             {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
@@ -322,6 +338,23 @@ export default function ChatScreen() {
           ]}>
             {item.text}
           </Text>
+          {canShowOriginal && (
+            <>
+              <TouchableOpacity onPress={() => toggleOriginalText(item.id)} style={styles.toggleOriginalButton}>
+                <Text style={[styles.toggleOriginalText, { color: isMe ? 'rgba(255, 255, 255, 0.8)' : colors.tint }]}>
+                  {isOriginalExpanded ? 'Hide Original' : 'Show Original'}
+                </Text>
+              </TouchableOpacity>
+              {isOriginalExpanded && (
+                <Text style={[
+                  styles.originalText,
+                  isMe ? styles.myOriginalText : [styles.otherOriginalText, { color: colors.icon }]
+                ]}>
+                  {item.originalText}
+                </Text>
+              )}
+            </>
+          )}
           <Text style={[
             styles.messageTime,
             !isMe && { color: colorScheme === 'dark' ? '#999' : 'rgba(0, 0, 0, 0.5)' }
@@ -514,48 +547,99 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   messagesContainer: {
-    padding: 15,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
     flexGrow: 1,
-    marginBottom: 10, // Add some space above the input container
   },
   messageBubble: {
     maxWidth: '80%',
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderRadius: 18,
     marginBottom: 10,
-    flexDirection: 'row', // Keep as row for potential icon alignment
-    alignItems: 'flex-end', // Align items like timestamp to the bottom
-    // Let the bubble determine its own width based on content + alignSelf
   },
   myMessage: {
-    alignSelf: 'flex-end', // Position the bubble to the right
+    alignSelf: 'flex-end',
     backgroundColor: '#0a7ea4',
   },
   otherMessage: {
-    alignSelf: 'flex-start', // Position the bubble to the left
-    // backgroundColor is handled by theme/dark mode logic in renderMessage
+    alignSelf: 'flex-start',
+  },
+  messageContentWrapper: {
+    flexDirection: 'column',
+    flexShrink: 1,
   },
   messageText: {
     fontSize: 16,
+    lineHeight: 22,
   },
   myMessageText: {
     color: '#fff',
   },
-  otherMessageText: {
-    color: '#000',
+  otherMessageText: {},
+  originalText: {
+    fontSize: 13,
+    marginTop: 4,
+    fontStyle: 'italic',
+    opacity: 0.9,
+  },
+  myOriginalText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+  },
+  otherOriginalText: {},
+  toggleOriginalButton: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  toggleOriginalText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   messageTime: {
     fontSize: 11,
-    marginTop: 5,
     color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'right',
     alignSelf: 'flex-end',
   },
+  secondaryAuthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  secondaryAuthIcon: {
+    marginRight: 8,
+  },
+  secondaryAuthText: {
+    flex: 1,
+    fontSize: 15,
+    fontStyle: 'italic',
+    marginRight: 8,
+  },
+  verifyButton: {
+    borderWidth: 1,
+    borderRadius: 15,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  verifyButtonText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  unlockedMessageContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  lockIconWrapper: {
+    paddingRight: 8,
+    paddingTop: 2,
+  },
   inputContainer: {
     flexDirection: 'row',
-    padding: 10,
-    borderTopWidth: 1,
-    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'flex-end',
   },
   input: {
     flex: 1,
@@ -563,38 +647,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 15,
     paddingVertical: 10,
-    maxHeight: 120,
     fontSize: 16,
+    maxHeight: 120,
+    marginRight: 10,
   },
   sendButton: {
-    marginLeft: 10,
-    padding: 10,
-    height: 44,
     width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  secondaryAuthContainer: {
-    alignItems: 'flex-start',
-    flexDirection: 'column',
-  },
-  secondaryAuthText: {
-    fontSize: 15,
-    fontStyle: 'italic',
-    marginLeft: 5,
-    flexShrink: 1,
-  },
-  verifyButton: {
-    borderWidth: 1,
-    borderRadius: 15,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    marginTop: 8,
-    alignSelf: 'flex-start',
-  },
-  verifyButtonText: {
-    fontSize: 13,
-    fontWeight: '500',
   },
   modalCenteredView: {
     flex: 1,
@@ -671,17 +733,5 @@ const styles = StyleSheet.create({
   modalSpinner: {
     marginTop: 15,
     marginBottom: 15,
-  },
-  lockIconWrapper: {
-    padding: 5,
-    marginRight: 8,
-    alignSelf: 'center',
-  },
-  unlockedMessageContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  messageContentWrapper: {
-    flexDirection: 'column',
   },
 });
