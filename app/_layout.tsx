@@ -1,23 +1,40 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { Provider } from 'react-redux';
-import { store } from './store/store';
+import { store, persistor } from './store/store'; // Import persistor
+import { PersistGate } from 'redux-persist/integration/react'; // Import PersistGate
 import { useAppDispatch, useAppSelector } from './store/hooks';
-import { initializeAuth, checkSessionExpiry } from './store/slices/authSlice';
+import { initializeAuth, checkSessionExpiry, logout } from './store/slices/authSlice';
 import { initializeTheme } from './store/slices/themeSlice';
-import { AppState, AppStateStatus, Text, View, ActivityIndicator } from 'react-native';
+import { setSosDisguise, DisguiseType } from './store/slices/appStateSlice';
+import { AppState, AppStateStatus, Text, View, ActivityIndicator, Alert } from 'react-native';
 import SessionExpiryNotification from '../components/SessionExpiryNotification';
+import DisguiseApp from '../components/DisguiseApp';
+import DisguiseWeather from '../components/DisguiseWeather';
+import DisguiseNotes from '../components/DisguiseNotes';
 import { useAppTheme } from './hooks/useAppTheme';
 import { logAuth, logAuthError, logNavigation, dumpAuthState } from '../utils/authLogger';
 
-// Function to wrap the app with Redux Provider
+// Function to wrap the app with Redux Provider and PersistGate
 export function RootLayoutNav() {
   return (
     <Provider store={store}>
-      <AppWrapper />
+      {/* Wrap AppWrapper with PersistGate */}
+      <PersistGate loading={<LoadingScreen />} persistor={persistor}>
+        <AppWrapper />
+      </PersistGate>
     </Provider>
   );
 }
+
+// Simple loading screen component for PersistGate
+const LoadingScreen = () => {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+      <ActivityIndicator size="large" color="#007AFF" />
+    </View>
+  );
+};
 
 // Helper to check if path is in auth group
 function isAuthGroup(segments: string[]) {
@@ -32,8 +49,19 @@ function AppWrapper() {
   const token = useAppSelector(state => state.auth.token);
   const sessionExpiryTime = useAppSelector(state => state.auth.sessionExpiryTime);
   const authInitialized = useAppSelector(state => state.auth.initialized);
+  const sosModeActive = useAppSelector(state => state.appState.sosModeActive);
+  const sosActivationTime = useAppSelector(state => state.appState.sosActivationTime);
+  const selectedDisguise = useAppSelector(state => state.appState.selectedDisguise);
   const { colors } = useAppTheme();
   const [initializing, setInitializing] = useState(true);
+  const sosLogoutTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const disguiseComponents = {
+    calculator: DisguiseApp,
+    weather: DisguiseWeather,
+    notes: DisguiseNotes,
+  };
+  const disguiseOptions = Object.keys(disguiseComponents) as Array<DisguiseType>;
 
   // Dump the full auth state for debugging
   useEffect(() => {
@@ -77,7 +105,6 @@ function AppWrapper() {
   // Set up session expiry check at more frequent intervals (every 5 seconds)
   useEffect(() => {
     if (token && sessionExpiryTime) {
-      // Check session every 5 seconds to ensure we can show the 30-second warning
       const sessionTimer = setInterval(() => {
         dispatch(checkSessionExpiry());
       }, 5000);
@@ -86,60 +113,83 @@ function AppWrapper() {
     }
   }, [token, sessionExpiryTime, dispatch]);
 
-  // Handle navigation based on auth state
+  // Handle SOS Mode Activation and Random Disguise Selection (using Redux)
   useEffect(() => {
-    // Wait until initialization is complete and auth state is known.
-    if (initializing || !authInitialized) {
-      logNavigation('Navigation effect skipped: Still initializing or auth not initialized', {
-        initializing,
-        authInitialized,
-        isReady: router.isReady, // Log router state too
-      });
+    if (sosModeActive && !selectedDisguise) {
+      const randomIndex = Math.floor(Math.random() * disguiseOptions.length);
+      const disguiseToSet = disguiseOptions[randomIndex];
+      dispatch(setSosDisguise(disguiseToSet));
+      logAuth('SOS Mode Activated: Randomly selected and set disguise -', disguiseToSet);
+    }
+  }, [sosModeActive, selectedDisguise, dispatch]);
+
+  // Handle SOS Mode Auto-Logout Timer
+  useEffect(() => {
+    if (sosLogoutTimerRef.current) {
+      clearTimeout(sosLogoutTimerRef.current);
+      sosLogoutTimerRef.current = null;
+    }
+
+    if (sosModeActive && sosActivationTime) {
+      const thirtyMinutes = 30 * 60 * 1000;
+      const timeElapsed = Date.now() - sosActivationTime;
+      const timeRemaining = thirtyMinutes - timeElapsed;
+
+      if (timeRemaining <= 0) {
+        logAuth('SOS Mode duration exceeded, logging out.');
+        dispatch(logout());
+      } else {
+        logAuth(`SOS Mode active. Setting auto-logout timer for ${Math.round(timeRemaining / 60000)} minutes.`);
+        sosLogoutTimerRef.current = setTimeout(() => {
+          if (store.getState().appState.sosModeActive) {
+            logAuth('SOS Mode auto-logout timer expired, logging out.');
+            Alert.alert("Session Expired", "SOS mode duration limit reached. You have been logged out.");
+            dispatch(logout());
+          } else {
+            logAuth('SOS Mode auto-logout timer expired, but SOS mode was already exited.');
+          }
+        }, timeRemaining);
+      }
+    }
+
+    return () => {
+      if (sosLogoutTimerRef.current) {
+        logAuth('Clearing SOS auto-logout timer.');
+        clearTimeout(sosLogoutTimerRef.current);
+        sosLogoutTimerRef.current = null;
+      }
+    };
+  }, [sosModeActive, sosActivationTime, dispatch]);
+
+  // Handle navigation based on auth state (only if NOT in SOS mode)
+  useEffect(() => {
+    if (sosModeActive) {
       return;
     }
 
-    // After initialization, router should generally be ready.
-    // Log if it's not, but proceed with navigation logic based on auth token.
-    if (!router.isReady) {
-        logNavigation('Router reported not ready, but proceeding with navigation check as app is initialized.', {
-            isReady: router.isReady,
-        });
-        // If issues persist, we might need to return here, but let's try proceeding first.
+    if (initializing || !authInitialized) {
+      return;
     }
 
     const inAuthGroup = isAuthGroup(segments);
-    logNavigation('Navigation check', { token: !!token, inAuthGroup, segments: segments.join('/'), routerReady: router.isReady });
 
     if (!token) {
-      // User is not logged in
       if (!inAuthGroup) {
-        // User is not logged in and not in the auth section, redirect to login
-        logNavigation('Redirecting to auth screen', { current: segments.join('/') });
-        router.replace('/(auth)'); // Use absolute path
+        router.replace('../(auth)');
       } else {
-        // User is not logged in and already in the auth section, do nothing
-        logNavigation('Already in auth screen, no redirect needed', { current: segments.join('/') });
       }
     } else {
-      // User is logged in
       if (inAuthGroup) {
-        // User is logged in but still in the auth section, redirect to main app
-        logNavigation('Redirecting to main app screen', { current: segments.join('/') });
-        router.replace('/(tabs)'); // Use absolute path to main app area
-      } else {
-        // User is logged in and already in the main app section, do nothing
-        logNavigation('Already in main app screen, no redirect needed', { current: segments.join('/') });
-      }
+        router.replace('../(tabs)');
+      } 
     }
-    // Keep dependencies the same, the logic inside just changed slightly.
-  }, [token, initializing, authInitialized, router.isReady, segments, router]);
+  }, [token, initializing, authInitialized, segments, router, sosModeActive]);
 
   // Handle app state changes to track activity
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active' && token) {
         logAuth('App returned to foreground, checking session');
-        // Also check if session has expired
         dispatch(checkSessionExpiry());
       }
     };
@@ -151,20 +201,22 @@ function AppWrapper() {
     };
   }, [token, dispatch]);
 
-  // If still initializing, show a loading screen
   if (initializing) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator size="large" color={colors.tint} />
-        <Text style={{ marginTop: 20, color: colors.text }}>Loading...</Text>
-      </View>
-    );
+    return <LoadingScreen />;
   }
+
+  const RenderDisguiseComponent = selectedDisguise ? disguiseComponents[selectedDisguise] : null;
 
   return (
     <View style={{ flex: 1 }}>
-      <SessionExpiryNotification />
-      <Slot />
+      {sosModeActive && RenderDisguiseComponent ? (
+        <RenderDisguiseComponent />
+      ) : (
+        <>
+          {!sosModeActive && <SessionExpiryNotification />}
+          <Slot />
+        </>
+      )}
     </View>
   );
 }

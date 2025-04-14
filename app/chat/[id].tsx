@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Modal, Pressable, Alert, SafeAreaView } from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Modal, Pressable, SafeAreaView } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack, useNavigation } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { sendMessage, setCurrentChat, clearCurrentChat, fetchConversations, verifySecondaryCode, fetchUnlockedMessage, manuallyLockMessage } from '../store/slices/chatSlice';
 import { logout } from '../store/slices/authSlice';
+import { enterSosMode } from '../store/slices/appStateSlice'; // Import the SOS action
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -217,7 +218,6 @@ export default function ChatScreen() {
     if (!primaryCode) {
       setSecondaryVerificationError('Cannot verify: Primary conversation code is missing.');
       console.error('Attempted secondary verification without primary code from navigation params.');
-      Alert.alert("Verification Error", "Cannot verify message at this time. Please go back and re-enter the conversation.");
       return;
     }
 
@@ -271,21 +271,6 @@ export default function ChatScreen() {
           setIsSecondaryVerifying(false);
           closeSecondaryModal();
 
-          Alert.alert(
-            "Too Many Failed Attempts",
-            "You have entered the wrong secondary code too many times. You will be logged out.",
-            [{ text: "OK", onPress: async () => {
-                try {
-                  await dispatch(logout()).unwrap();
-                  requestAnimationFrame(() => {
-                    router.replace('../(auth)');
-                  });
-                } catch (logoutError) {
-                   console.error("Logout failed after failed secondary attempts:", logoutError);
-                   Alert.alert("Logout Error", "Failed to log out automatically.");
-                }
-            }}]
-          );
           return;
         }
         setIsSecondaryVerifying(false);
@@ -306,8 +291,8 @@ export default function ChatScreen() {
   };
 
   const handleSosPress = () => {
-    console.log('SOS button pressed');
-    Alert.alert("SOS", "SOS functionality not yet implemented.");
+    console.log('SOS button pressed - Activating SOS Mode directly');
+    dispatch(enterSosMode());
   };
 
   const toggleOriginalText = (messageId: string) => {
@@ -402,7 +387,6 @@ export default function ChatScreen() {
       <View style={[
         styles.messageBubble,
         isMe ? styles.myMessage : [styles.otherMessage, { backgroundColor: colorScheme === 'dark' ? '#333' : '#E5E5EA' }],
-        item.secondary_auth && isCurrentlyUnlocked && styles.unlockedMessageContainer
       ]}>
         {item.secondary_auth && isCurrentlyUnlocked && (
           <TouchableOpacity onPress={() => handleManualLock(item.id)} style={styles.lockIconWrapper}>
