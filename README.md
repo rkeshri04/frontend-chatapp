@@ -1,50 +1,76 @@
-# Welcome to your Expo app 👋
+# ChatApp Frontend 👋
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This is the frontend mobile application for ChatApp, built using [Expo](https://expo.dev) and [React Native](https://reactnative.dev/).
+
+## Overview
+
+ChatApp is a secure messaging application designed for real-time communication. This frontend provides the user interface for interacting with the ChatApp backend services, including user authentication, conversation management, and messaging.
+
+**Note:** This frontend application requires the corresponding ChatApp backend service to be running and accessible. The backend handles data storage, authentication logic, and core messaging features. Without the backend, this application will not function. The backend code is private due to privacy and security reasons and not publicly available.
+
+## Key Features
+
+*   **User Authentication:** Secure login and registration using JWT.
+*   **Real-time Messaging:** Send and receive messages instantly within conversations.
+*   **Conversation Management:** View, start, and manage chat conversations.
+*   **Secure Messaging:** Features like primary and secondary codes for enhanced message privacy.
+*   **Theme Switching:** Supports light, dark, and system theme preferences.
+*   **State Management:** Uses Redux Toolkit for predictable state management.
+*   **Navigation:** File-based routing powered by Expo Router.
+
+## Tech Stack
+
+*   **Framework:** Expo (React Native)
+*   **Language:** TypeScript
+*   **State Management:** Redux Toolkit
+*   **Navigation:** Expo Router
+*   **UI Components:** React Native core components, custom components
+*   **Icons:** @expo/vector-icons (Ionicons)
 
 ## Get started
 
-1. Install dependencies
+1.  **Install dependencies**
 
-   ```bash
-   npm install
-   ```
+    ```bash
+    npm install
+    # or
+    yarn install
+    ```
 
-2. Start the app
+2.  **Configure Environment**
+    *   You might need to set up environment variables (e.g., API URL) in app.json.
 
-   ```bash
-    npx expo start
-   ```
+3.  **Start the app**
 
-In the output, you'll find options to open the app in a
+    ```bash
+     npx expo start
+    ```
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+    In the output, you'll find options to open the app in a:
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+    *   [Development build](https://docs.expo.dev/develop/development-builds/introduction/)
+    *   [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+    *   [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+    *   [Expo Go](https://expo.dev/go) (May have limitations depending on native modules used)
 
-## Get a fresh project
+## Project Structure
 
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+*   **`app/`**: Contains all screens and navigation logic using Expo Router's file-based routing.
+    *   **`(auth)/`**: Authentication-related screens (Login, Register).
+    *   **`(tabs)/`**: Main application screens after login (Chats, Profile).
+    *   **`chat/`**: Chat-specific screens and layouts.
+    *   **`store/`**: Redux Toolkit setup (store, slices, hooks).
+*   **`assets/`**: Static assets like images and fonts.
+*   **`components/`**: Reusable UI components used across the application.
+*   **`constants/`**: Shared constants like color definitions.
+*   **`hooks/`**: Custom React hooks (e.g., `useAppTheme`).
+*   **`utils/`**: Utility functions (e.g., logging, debugging).
 
 ## Learn more
 
-To learn more about developing your project with Expo, look at the following resources:
+To learn more about the technologies used, refer to their official documentation:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+*   [Expo Documentation](https://docs.expo.dev/)
+*   [React Native Documentation](https://reactnative.dev/docs/getting-started)
+*   [Expo Router Documentation](https://docs.expo.dev/router/introduction/)
+*   [Redux Toolkit Documentation](https://redux-toolkit.js.org/)
