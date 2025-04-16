@@ -43,3 +43,7 @@ export const persistor = persistStore(store);
 // Define RootState based on the rootReducer
 export type RootState = ReturnType<typeof rootReducer>;
 export type AppDispatch = typeof store.dispatch;
+
+// Add a default export to fix the route issue
+export default function StoreComponent() {
+}

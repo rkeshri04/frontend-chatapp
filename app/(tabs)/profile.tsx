@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View, ScrollView, Alert, useColorScheme, Switch } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, ScrollView, Alert, useColorScheme, Switch, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout } from '../store/slices/authSlice';
@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { debugAuthToken, testAuthRequest, setQuickExpirySession } from '../../utils/authDebugger';
 import Constants from 'expo-constants';
 import { Colors } from '../../constants/Colors';
+import PrivacyContent from '../../components/PrivacyContent'; // Import PrivacyContent component
 
 export default function ProfileScreen() {
   const user = useAppSelector(state => state.auth.user);
@@ -103,7 +104,11 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleMenuPress = () => {};
+  const handleMenuPress = (screen: string) => {
+    if (screen === 'privacy') {
+      setPrivacyModalVisible(true);
+    }
+  };
 
   // Add this function to debug authentication
   const handleDebugAuth = async () => {
@@ -119,6 +124,12 @@ export default function ProfileScreen() {
   };
 
   const appVersion = Constants.expoConfig?.version || '1.0.0'; // Get app version
+
+  const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
+
+  const closePrivacyModal = () => {
+    setPrivacyModalVisible(false);
+  };
 
   return (
     <ScrollView 
@@ -175,19 +186,7 @@ export default function ProfileScreen() {
       </View>
 
       <View style={[styles.section]}>
-        {/* <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleMenuPress}>
-          <Ionicons name="person-outline" size={24} color={colors.tint} />
-          <Text style={[styles.menuText, { color: colors.text }]}>Edit Profile</Text>
-          <Ionicons name="chevron-forward" size={20} color={colors.icon} />
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleMenuPress}>
-          <Ionicons name="notifications-outline" size={24} color={colors.tint} />
-          <Text style={[styles.menuText, { color: colors.text }]}>Notifications</Text>
-          <Ionicons name="chevron-forward" size={20} color={colors.icon} />
-        </TouchableOpacity> */}
-        
-        <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={handleMenuPress}>
+        <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => handleMenuPress('privacy')}>
           <Ionicons name="lock-closed-outline" size={24} color={colors.tint} />
           <Text style={[styles.menuText, { color: colors.text }]}>Privacy</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.icon} />
@@ -236,6 +235,28 @@ export default function ProfileScreen() {
       <Text style={[styles.versionText, { color: colors.icon }]}>
         ChatApp v{appVersion}
       </Text>
+
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={privacyModalVisible}
+        onRequestClose={closePrivacyModal}
+      >
+        <View style={styles.modalCenteredView}>
+          <View style={[styles.modalView, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Privacy Policy</Text>
+            <ScrollView style={styles.modalContent}>
+              <PrivacyContent colors={colors} />
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: colors.tint }]}
+              onPress={closePrivacyModal}
+            >
+              <Text style={styles.modalButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -316,5 +337,48 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20, // Space above the version text
     fontSize: 12,
+  },
+  modalCenteredView: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalView: {
+    margin: 20,
+    borderRadius: 20,
+    padding: 35,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    width: '85%',
+    height: '85%',
+  },
+  modalTitle: {
+    marginBottom: 15,
+    textAlign: "center",
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  modalContent: {
+    flex: 1,
+    marginBottom: 20,
+  },
+  modalButton: {
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    elevation: 2,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    textAlign: "center",
+    fontSize: 16,
   },
 });
