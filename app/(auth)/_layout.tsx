@@ -14,18 +14,17 @@ export default function AuthLayout() {
         contentStyle: {
           backgroundColor: colors.background,
         },
-        headerShadowVisible: false, // Remove shadow under header
       }}
     >
       <Stack.Screen
         name="index"
         options={{
           headerTitle: "Sign In",
-          headerShown: false,
+          headerShown: true,
         }}
       />
       <Stack.Screen
-        name="signup"
+        name="register" // Changed from 'signup'
         options={{
           headerTitle: "Create Account",
           headerShown: true,
