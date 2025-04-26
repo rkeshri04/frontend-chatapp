@@ -7,6 +7,8 @@ import { logout } from '../store/slices/authSlice';
 import { enterSosMode } from '../store/slices/appStateSlice'; // Import the SOS action
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
+import { Alert } from 'react-native'; // Import Alert
+
 
 interface Message {
   id: string;
@@ -270,7 +272,7 @@ export default function ChatScreen() {
         if (updatedAttempts >= 3 && verifyResultAction.payload === 'Invalid secondary code') {
           setIsSecondaryVerifying(false);
           closeSecondaryModal();
-
+          dispatch(logout());
           return;
         }
         setIsSecondaryVerifying(false);

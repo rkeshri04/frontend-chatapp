@@ -1,9 +1,10 @@
-import { createSlice, createAsyncThunk, PayloadAction, createSelector } from '@reduxjs/toolkit'; // Import createSelector
+import { createSlice, createAsyncThunk, PayloadAction, createSelector, AsyncThunkAction, ThunkDispatch, UnknownAction } from '@reduxjs/toolkit'; // Import createSelector
 import axios from 'axios';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { RootState } from '../store'; // Adjust path if necessary
 import { Alert } from 'react-native'; // Import Alert
+import { logout } from './authSlice'; // Import logout action
 
 const API_URL = Constants.expoConfig?.extra?.apiUrl || 'http://127.0.0.1:8000';
 
@@ -654,6 +655,17 @@ const chatSlice = createSlice({
           if (message) {
             message.verification_attempts = (message.verification_attempts || 0) + 1;
             console.log(`Secondary verification failed for message ${messageId}. Attempt ${message.verification_attempts}. Error: ${action.payload}`);
+            if (message.verification_attempts >= 3) {
+              console.log('Too many failed attempts to verify secondary code. Logging out.');
+              Alert.alert(
+                "Too Many Failed Attempts",
+                "You have entered the wrong code too many times. You will be logged out for security.",
+                [{ text: "OK", onPress: async () => {
+                    // Dispatch logout action
+                    dispatch(logout());
+                }}]
+              );
+            }
           }
         }
       })
@@ -727,3 +739,7 @@ export const selectMappedChats = createSelector(
 export const { setCurrentChat, clearCurrentChat, receiveMessage, manuallyLockMessage } = chatSlice.actions;
 
 export default chatSlice.reducer;
+function dispatch(arg0: AsyncThunkAction<true, void, { state?: unknown; dispatch?: ThunkDispatch<unknown, unknown, UnknownAction>; extra?: unknown; rejectValue?: unknown; serializedErrorType?: unknown; pendingMeta?: unknown; fulfilledMeta?: unknown; rejectedMeta?: unknown; }>) {
+  throw new Error('Function not implemented.');
+}
+
